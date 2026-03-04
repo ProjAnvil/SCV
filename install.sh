@@ -1,6 +1,7 @@
 #!/bin/bash
 
 # SCV Installation Script - Installs SCV (Source Code Vault) for Claude Code
+# Supports Windows (Git Bash, MSYS2, Cygwin), macOS, and Linux
 
 set -e
 
@@ -25,6 +26,19 @@ print_warning() {
 print_error() {
     echo -e "${RED}❌ $1${NC}"
 }
+
+# Detect OS
+detect_os() {
+    if [[ "$OSTYPE" == "msys" ]] || [[ "$OSTYPE" == "win32" ]] || [[ "$OSTYPE" == "cygwin" ]]; then
+        echo "windows"
+    elif [[ "$OSTYPE" == "darwin"* ]]; then
+        echo "macos"
+    else
+        echo "linux"
+    fi
+}
+
+OS_TYPE=$(detect_os)
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -53,8 +67,30 @@ for arg in "$@"; do
 done
 
 print_info "SCV Installation Script"
+print_info "OS Detected: $OS_TYPE"
 print_info "Language: $PROMPT_LANG"
 echo ""
+
+# Windows-specific warnings
+if [ "$OS_TYPE" = "windows" ]; then
+    print_warning "Windows Detected"
+    print_info "On Windows, files will be copied instead of linked."
+    print_info "You'll need to re-run this script after making changes to prompts/commands."
+    echo ""
+fi
+
+# Function to copy directory or file (used for Windows compatibility)
+copy_item() {
+    local source=$1
+    local target=$2
+    local item_type=$3  # "dir" or "file"
+
+    if [ "$item_type" = "dir" ]; then
+        cp -r "$source" "$target"
+    else
+        cp "$source" "$target"
+    fi
+}
 
 print_info "Step 1: Creating SCV configuration directory..."
 mkdir -p ~/.scv
@@ -114,5 +150,14 @@ print_info "You can now use SCV commands in Claude Code:"
 echo "  /scv.gather   - Clone and manage repositories"
 echo "  /scv.run      - Analyze a single codebase"
 echo "  /scv.batchRun  - Batch analyze multiple repositories"
+echo ""
+if [ "$OS_TYPE" = "windows" ]; then
+    print_warning "Windows Notes:"
+    echo "  - Files are copied, not linked"
+    echo "  - Re-run this script after updating prompts or commands"
+    echo "  - To remove: rm -rf ~/.scv/prompts ~/.claude/commands"
+else
+    print_info "To switch language, run: $0 --lang=<en|zh-cn>"
+fi
 echo ""
 print_info "For more information, see README.md"
