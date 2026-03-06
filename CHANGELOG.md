@@ -22,6 +22,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Expanded "Analysis Principles" with more actionable guidance
   - Improved overall structure and clarity for both English and Chinese versions
 
+### Fixed
+- **Installation Script**
+  - Fixed `install.sh` to only remove `scv.*` commands instead of entire `~/.claude/commands` directory
+  - Prevents accidental deletion of other user-installed Claude commands
+
 ## [0.2.0] - 2026-01-30
 
 ### Changed

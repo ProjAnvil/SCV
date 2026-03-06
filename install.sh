@@ -125,13 +125,16 @@ echo ""
 print_info "Step 4: Copying commands to Claude directory..."
 
 if [ -d "$HOME/.claude" ]; then
-    if [ -d "$HOME/.claude/commands" ]; then
-        print_warning "Removing existing ~/.claude/commands directory..."
-        rm -rf "$HOME/.claude/commands"
+    mkdir -p "$HOME/.claude/commands"
+
+    # Remove only scv.* commands to avoid affecting other commands
+    if ls "$HOME/.claude/commands"/scv.* 1> /dev/null 2>&1; then
+        print_warning "Removing existing scv.* commands..."
+        rm -f "$HOME/.claude/commands"/scv.*
     fi
 
-    cp -r "$SCRIPT_DIR/commands" ~/.claude/
-    print_success "Copied commands to ~/.claude/commands"
+    cp "$SCRIPT_DIR/commands"/scv.* "$HOME/.claude/commands/"
+    print_success "Copied scv commands to ~/.claude/commands"
 else
     print_error "Claude directory not found at ~/.claude"
     print_info "Please make sure Claude Code is installed first"
