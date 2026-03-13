@@ -47,7 +47,7 @@ if [ ! -f "$SCRIPT_DIR/config.example.json" ]; then
     exit 1
 fi
 
-PROMPT_LANG="en"
+SKILL_LANG="en"
 
 for arg in "$@"; do
     case $arg in
@@ -55,46 +55,35 @@ for arg in "$@"; do
         echo "Usage: $0 [--lang=en|zh-cn]"
         echo ""
         echo "Options:"
-        echo "  --lang=en      Install with English prompts (default)"
-        echo "  --lang=zh-cn   Install with Chinese prompts"
+        echo "  --lang=en      Install English skill (default)"
+        echo "  --lang=zh-cn   Install Chinese skill"
         echo "  -h, --help     Show this help message"
         exit 0
         ;;
         --lang=*)
-            PROMPT_LANG="${arg#*=}"
+            SKILL_LANG="${arg#*=}"
             ;;
     esac
 done
 
 print_info "SCV Installation Script"
 print_info "OS Detected: $OS_TYPE"
-print_info "Language: $PROMPT_LANG"
+print_info "Language: $SKILL_LANG"
 echo ""
 
 # Windows-specific warnings
 if [ "$OS_TYPE" = "windows" ]; then
     print_warning "Windows Detected"
     print_info "On Windows, files will be copied instead of linked."
-    print_info "You'll need to re-run this script after making changes to prompts/commands."
+    print_info "You'll need to re-run this script after making changes to skills."
     echo ""
 fi
 
-# Function to copy directory or file (used for Windows compatibility)
-copy_item() {
-    local source=$1
-    local target=$2
-    local item_type=$3  # "dir" or "file"
-
-    if [ "$item_type" = "dir" ]; then
-        cp -r "$source" "$target"
-    else
-        cp "$source" "$target"
-    fi
-}
-
 print_info "Step 1: Creating SCV configuration directory..."
 mkdir -p ~/.scv
-print_success "Created ~/.scv directory"
+mkdir -p ~/.scv/repos
+mkdir -p ~/.scv/analysis
+print_success "Created ~/.scv directory structure"
 echo ""
 
 print_info "Step 2: Copying configuration file..."
@@ -106,38 +95,49 @@ else
 fi
 echo ""
 
-print_info "Step 3: Copying prompts ($PROMPT_LANG)..."
+print_info "Step 3: Installing SCV skill ($SKILL_LANG)..."
 
-if [ -d ~/.scv/prompts ]; then
-    print_warning "Removing existing ~/.scv/prompts directory..."
-    rm -rf ~/.scv/prompts
-fi
+if [ -d "$HOME/.claude" ]; then
+    # Remove old commands if they exist
+    if [ -d "$HOME/.claude/commands" ]; then
+        if ls "$HOME/.claude/commands"/scv.* 1> /dev/null 2>&1; then
+            print_warning "Removing old scv.* commands..."
+            rm -f "$HOME/.claude/commands"/scv.*
+        fi
+    fi
 
-if [ -d "$SCRIPT_DIR/prompts/$PROMPT_LANG" ]; then
-    cp -r "$SCRIPT_DIR/prompts/$PROMPT_LANG" ~/.scv/prompts
-    print_success "Copied prompts/$PROMPT_LANG to ~/.scv/prompts"
+    # Remove old skill structure (skills/scv) if exists
+    if [ -d "$HOME/.claude/skills/scv" ]; then
+        print_warning "Removing old skill structure..."
+        rm -rf "$HOME/.claude/skills/scv"
+    fi
+
+    # Check if language-specific skill exists
+    if [ ! -d "$SCRIPT_DIR/skills/$SKILL_LANG" ]; then
+        print_error "Skill not found: $SCRIPT_DIR/skills/$SKILL_LANG"
+        print_info "Available languages: en, zh-cn"
+        exit 1
+    fi
+
+    # Install language-specific skill as 'scv'
+    mkdir -p "$HOME/.claude/skills"
+    cp -r "$SCRIPT_DIR/skills/$SKILL_LANG" "$HOME/.claude/skills/scv"
+    print_success "Installed scv skill ($SKILL_LANG) to ~/.claude/skills/scv"
 else
-    print_error "Prompts directory not found: $SCRIPT_DIR/prompts/$PROMPT_LANG"
+    print_error "Claude directory not found at ~/.claude"
+    print_info "Please make sure Claude Code is installed first"
     exit 1
 fi
 echo ""
 
-print_info "Step 4: Copying commands to Claude directory..."
-
-if [ -d "$HOME/.claude" ]; then
-    mkdir -p "$HOME/.claude/commands"
-
-    # Remove only scv.* commands to avoid affecting other commands
-    if ls "$HOME/.claude/commands"/scv.* 1> /dev/null 2>&1; then
-        print_warning "Removing existing scv.* commands..."
-        rm -f "$HOME/.claude/commands"/scv.*
-    fi
-
-    cp "$SCRIPT_DIR/commands"/scv.* "$HOME/.claude/commands/"
-    print_success "Copied scv commands to ~/.claude/commands"
+print_info "Step 4: Installing project-analyzer agent ($SKILL_LANG)..."
+mkdir -p "$HOME/.claude/agents"
+if [ -f "$SCRIPT_DIR/agents/$SKILL_LANG/project-analyzer.md" ]; then
+    cp "$SCRIPT_DIR/agents/$SKILL_LANG/project-analyzer.md" "$HOME/.claude/agents/project-analyzer.md"
+    print_success "Installed project-analyzer agent ($SKILL_LANG) to ~/.claude/agents/"
 else
-    print_error "Claude directory not found at ~/.claude"
-    print_info "Please make sure Claude Code is installed first"
+    print_error "Agent definition not found: $SCRIPT_DIR/agents/$SKILL_LANG/project-analyzer.md"
+    print_info "Available languages: en, zh-cn"
     exit 1
 fi
 echo ""
@@ -146,19 +146,21 @@ print_success "SCV installation completed!"
 echo ""
 echo "Installation summary:"
 echo "  - Configuration: ~/.scv/config.json"
-echo "  - Prompts: ~/.scv/prompts ($PROMPT_LANG)"
-echo "  - Commands: ~/.claude/commands"
+echo "  - Repository storage: ~/.scv/repos/"
+echo "  - Analysis output: ~/.scv/analysis/"
+echo "  - Skill: ~/.claude/skills/scv ($SKILL_LANG)"
+echo "  - Agent: ~/.claude/agents/project-analyzer.md"
 echo ""
 print_info "You can now use SCV commands in Claude Code:"
-echo "  /scv.gather   - Clone and manage repositories"
-echo "  /scv.run      - Analyze a single codebase"
-echo "  /scv.batchRun  - Batch analyze multiple repositories"
+echo "  /scv run <path|url>  - Analyze a single repository"
+echo "  /scv batchRun        - Batch analyze multiple repositories (parallel)"
+echo "  /scv gather <opts>   - Clone and manage repositories"
 echo ""
 if [ "$OS_TYPE" = "windows" ]; then
     print_warning "Windows Notes:"
     echo "  - Files are copied, not linked"
-    echo "  - Re-run this script after updating prompts or commands"
-    echo "  - To remove: rm -rf ~/.scv/prompts ~/.claude/commands"
+    echo "  - Re-run this script after updating skills"
+    echo "  - To remove: rm -rf ~/.scv ~/.claude/skills/scv ~/.claude/agents/project-analyzer.md"
 else
     print_info "To switch language, run: $0 --lang=<en|zh-cn>"
 fi

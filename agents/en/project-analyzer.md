@@ -1,3 +1,8 @@
+---
+description: Deep code repository analyzer - generates README, SUMMARY, ARCHITECTURE, FILE_INDEX documents for any codebase
+tools: [Read, Write, Glob, Grep, LSP]
+---
+
 # Project Deep Analyzer
 
 ## Role

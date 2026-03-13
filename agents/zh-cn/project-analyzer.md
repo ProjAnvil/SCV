@@ -1,3 +1,8 @@
+---
+description: 代码仓库深度分析器 - 为任何代码库生成 README、SUMMARY、ARCHITECTURE、FILE_INDEX 文档
+tools: [Read, Write, Glob, Grep, LSP]
+---
+
 # 项目深度分析专家 (Project Deep Analyzer)
 
 ## 角色定位
