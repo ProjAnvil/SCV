@@ -64,18 +64,20 @@ The script will:
 ├── repos/           # Cloned remote repositories
 └── analysis/        # Generated documentation
 
-~/.claude/skills/scv/
-├── SKILL.md         # Skill entry point
-└── references/
-    ├── run.md
-    ├── batchRun.md
-    ├── gather.md
-    ├── project-analyzer.md
-    └── templates/
-        ├── README.template.md
-        ├── SUMMARY.template.md
-        ├── ARCHITECTURE.template.md
-        └── FILE_INDEX.template.md
+~/.claude/
+├── agents/
+│   └── project-analyzer.md   # Subagent for code analysis
+└── skills/scv/
+    ├── SKILL.md              # Skill entry point
+    └── references/
+        ├── run.md
+        ├── batchRun.md
+        ├── gather.md
+        └── templates/
+            ├── README.template.md
+            ├── SUMMARY.template.md
+            ├── ARCHITECTURE.template.md
+            └── FILE_INDEX.template.md
 ```
 
 ## Quick Start
@@ -131,7 +133,7 @@ Perform deep analysis on a single codebase, generating 4 documents:
 
 ### scv batchRun - Batch Codebase Analysis
 
-Analyze multiple repositories in parallel using subagents. Each repository gets its own isolated context.
+Analyze multiple repositories in parallel using the `project-analyzer` subagent. Each repository gets its own isolated context.
 
 #### Usage
 
@@ -143,9 +145,10 @@ Reads configuration from `~/.scv/config.json`.
 
 #### Key Features
 
-- **True Parallelism**: Each repository runs in an independent subagent
+- **Subagent-Based**: Uses dedicated `project-analyzer` subagent for each repository
+- **Concurrent Limit**: Maximum 5 parallel subagents (batched processing for larger sets)
+- **Task Tracking**: TodoWrite-based progress visibility
 - **Context Isolation**: No context bloat from analyzing multiple repositories
-- **Progress Tracking**: Real-time updates as each analysis completes
 - **Error Resilience**: Individual failures don't affect other analyses
 
 ### scv gather - Git Repository Management
