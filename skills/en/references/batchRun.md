@@ -135,13 +135,38 @@ This enables:
 
 ### Step 5: Parallel Execution with Concurrency Limit
 
-**Maximum concurrent subagents: 5**
+⚠️ **Critical Constraint: Maximum concurrent subagents MUST be 5. This is a hard limit!**
 
-When analyzing more than 5 repositories, process in batches of 5:
-- First batch: repos 1-5 → fork 5 subagents
-- Wait for batch completion
-- Next batch: repos 6-10 → fork 5 subagents
-- Continue until all complete
+**Why must we limit concurrency?**
+- Too many simultaneous subagents consume excessive system resources
+- May cause API rate limiting or timeouts
+- Affects overall task stability
+
+**Batch Processing Logic (Pseudocode):**
+
+```
+repos = [repo1, repo2, ..., repoN]  # All repositories
+BATCH_SIZE = 5                       # Max 5 per batch
+
+for batch_start in range(0, len(repos), BATCH_SIZE):
+    batch = repos[batch_start : batch_start + BATCH_SIZE]
+
+    # Step A: Fork subagents for this batch in a single turn
+    for repo in batch:
+        Agent(subagent_type="project-analyzer", ..., run_in_background=true)
+
+    # Step B: [CRITICAL] Must wait for ALL subagents in this batch to complete
+    # Use TaskOutput to block and wait for each subagent
+    for each agent_task_id in batch:
+        TaskOutput(task_id=agent_task_id, block=true, timeout=600000)
+
+    # Step C: Only after this batch fully completes, proceed to next batch
+```
+
+**⚠️ Strict Execution Requirements:**
+1. **DO NOT fork more than 5 subagents in a single turn**
+2. **Each batch MUST use TaskOutput with block=true to wait for completion** - not just fire-and-forget
+3. **Only after current batch fully completes** can the next batch be started in a new turn
 
 **For each batch, use Agent tool to fork subagents:**
 

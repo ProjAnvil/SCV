@@ -135,13 +135,38 @@ TodoWrite([
 
 ### Step 5: 并发执行（限制最大并发数）
 
-**最大并发 subagent 数：5**
+⚠️ **关键约束：最大并发 subagent 数必须为 5，这是硬性限制！**
 
-当分析超过 5 个仓库时，按每批 5 个进行处理：
-- 第一批：仓库 1-5 → fork 5 个 subagent
-- 等待批次完成
-- 下一批：仓库 6-10 → fork 5 个 subagent
-- 继续直到全部完成
+**为什么必须限制并发数？**
+- 同时启动过多 subagent 会消耗大量系统资源
+- 可能导致 API 限流或超时
+- 影响整体任务稳定性
+
+**批次处理逻辑（伪代码）：**
+
+```
+repos = [repo1, repo2, ..., repoN]  # 所有仓库
+BATCH_SIZE = 5                       # 每批最多 5 个
+
+for batch_start in range(0, len(repos), BATCH_SIZE):
+    batch = repos[batch_start : batch_start + BATCH_SIZE]
+
+    # Step A: 在同一个 turn 中 fork 本批次的 subagents
+    for repo in batch:
+        Agent(subagent_type="project-analyzer", ..., run_in_background=true)
+
+    # Step B: 【关键】必须等待本批次全部完成才能继续下一批
+    # 使用 TaskOutput 等待每个 subagent 完成
+    for each agent_task_id in batch:
+        TaskOutput(task_id=agent_task_id, block=true, timeout=600000)
+
+    # Step C: 本批次全部完成后，才进入下一批次循环
+```
+
+**⚠️ 严格执行要求：**
+1. **不得在一个 turn 中 fork 超过 5 个 subagent**
+2. **每批次必须使用 TaskOutput 阻塞等待完成**，不能只是启动后继续
+3. **只有当前批次全部完成后**，才能在下一个 turn 中启动下一批次
 
 **每批使用 Agent tool fork subagent：**
 
