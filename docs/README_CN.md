@@ -34,6 +34,7 @@
 - 🔄 **远程仓库管理**：克隆、更新和管理远程 Git 仓库
 - 📊 **深度代码分析**：为任何代码库生成全面的文档
 - 🚀 **并行处理**：使用 subagent 同时分析多个仓库（最大并发 5 个）
+- ⚡ **增量分析**：自动跳过 HEAD commit 未变化的仓库，无需重复分析
 - 📝 **多种输出格式**：README、摘要、架构、文件索引
 - 🤖 **远程仓库自动拉取**：始终分析最新代码
 - 🎯 **灵活配置**：支持远程和本地仓库
@@ -60,7 +61,7 @@
 - 创建 `~/.scv` 配置目录
 - 复制配置文件
 - 安装所选语言的 skill 到 `~/.claude/skills/scv`
-- 安装 project-analyzer agent 到 `~/.claude/agents/`
+- 安装 `project-analyzer` agent 到 `~/.claude/agents/`
 
 ### 安装后目录结构
 
@@ -68,10 +69,12 @@
 ~/.scv/
 ├── config.json      # 仓库配置
 ├── repos/           # 克隆的远程仓库
-└── analysis/        # 生成的文档
+├── analysis/        # 生成的文档
+└── sessions/        # batchRun 会话状态（崩溃恢复用）
 
 ~/.claude/skills/scv/
 ├── SKILL.md         # Skill 入口
+├── scripts/         # Python 辅助脚本（scv_util、batch_manager、git_op）
 └── references/
     ├── run.md
     ├── batchRun.md
@@ -152,10 +155,12 @@ open ~/.scv/analysis/project/README.md
 #### 核心特性
 
 - **Subagent 驱动**：每个仓库使用专用的 `project-analyzer` subagent
-- **并发限制**：最大 5 个并行 subagent（超过则分批处理）
+- **可配置并发**：config 中的 `batch_size` 设置最大并行数（默认 5）
+- **增量跳过**：HEAD commit 未变化的仓库自动跳过，无需重复分析
 - **任务追踪**：基于 TodoWrite 的进度可视化
 - **上下文隔离**：避免分析多个仓库时的上下文膨胀
 - **错误容错**：单个失败不影响其他分析
+- **崩溃恢复**：会话状态持久化至 `~/.scv/sessions/`，支持断点续跑
 
 ### scv gather - Git 仓库管理
 
@@ -198,6 +203,7 @@ open ~/.scv/analysis/project/README.md
 ```json
 {
   "output_dir": "~/.scv/analysis",
+  "batch_size": 5,
   "repos": [
     {
       "type": "remote",
@@ -227,7 +233,8 @@ open ~/.scv/analysis/project/README.md
 | 字段 | 必填 | 说明 | 默认值 |
 |------|------|------|--------|
 | `output_dir` | 否 | 所有分析的输出目录 | `~/.scv/analysis` |
-| `parallel` | 否 | 并行执行 | `true` |
+| `batch_size` | 否 | batchRun 每批最大并发 subagent 数 | `5` |
+| `parallel` | 否 | 批内并行执行 | `true` |
 | `fail_fast` | 否 | 遇到错误停止 | `false` |
 
 **远程仓库字段：**
@@ -371,9 +378,10 @@ A: 重新运行安装脚本恢复模板。
 SCV 使用基于 skill 的架构：
 
 1. **SKILL.md** - 入口点，路由子命令
-2. **references/** - 详细实现文档
+2. **references/** - 各子命令的详细实现文档
 3. **templates/** - 文档生成模板
-4. **project-analyzer.md** - 专用分析 subagent
+4. **scripts/** - Python 辅助脚本（`scv_util.py`、`batch_manager.py`、`git_op.py`）
+5. **project-analyzer agent** - 专用分析 subagent，负责实际代码分析
 
 每个语言版本（en, zh-cn）都是独立的目录。
 

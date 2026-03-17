@@ -29,6 +29,7 @@
 - 🔄 **Remote Repository Management**: Clone, update, and manage remote Git repositories
 - 📊 **Deep Code Analysis**: Generate comprehensive documentation for any codebase
 - 🚀 **Parallel Processing**: Analyze multiple repositories simultaneously with subagents
+- ⚡ **Incremental Analysis**: Skip repos whose HEAD commit hasn't changed since last analysis
 - 📝 **Multiple Output Formats**: README, Summary, Architecture, File Index
 - 🤖 **Auto-Pull for Remote Repos**: Always analyze the latest code
 - 🎯 **Flexible Configuration**: Support both remote and local repositories
@@ -55,6 +56,7 @@ The script will:
 - Create `~/.scv` configuration directory
 - Copy the configuration file
 - Install the language-specific skill to `~/.claude/skills/scv`
+- Install the `project-analyzer` agent to `~/.claude/agents/`
 
 ### Directory Structure After Installation
 
@@ -62,13 +64,15 @@ The script will:
 ~/.scv/
 ├── config.json      # Repository configuration
 ├── repos/           # Cloned remote repositories
-└── analysis/        # Generated documentation
+├── analysis/        # Generated documentation
+└── sessions/        # batchRun session state (crash recovery)
 
 ~/.claude/
 ├── agents/
 │   └── project-analyzer.md   # Subagent for code analysis
 └── skills/scv/
     ├── SKILL.md              # Skill entry point
+    ├── scripts/              # Python helper scripts (scv_util, batch_manager, git_op)
     └── references/
         ├── run.md
         ├── batchRun.md
@@ -146,10 +150,12 @@ Reads configuration from `~/.scv/config.json`.
 #### Key Features
 
 - **Subagent-Based**: Uses dedicated `project-analyzer` subagent for each repository
-- **Concurrent Limit**: Maximum 5 parallel subagents (batched processing for larger sets)
+- **Configurable Concurrency**: `batch_size` in config sets the max parallel subagents (default: 5)
+- **Incremental Skip**: Repos with unchanged HEAD commit are automatically skipped
 - **Task Tracking**: TodoWrite-based progress visibility
 - **Context Isolation**: No context bloat from analyzing multiple repositories
 - **Error Resilience**: Individual failures don't affect other analyses
+- **Crash Recovery**: Session state persisted to `~/.scv/sessions/` for resumability
 
 ### scv gather - Git Repository Management
 
@@ -192,6 +198,7 @@ Location: `~/.scv/config.json`
 ```json
 {
   "output_dir": "~/.scv/analysis",
+  "batch_size": 5,
   "repos": [
     {
       "type": "remote",
@@ -221,7 +228,8 @@ Location: `~/.scv/config.json`
 | Field | Required | Description | Default |
 |-------|----------|-------------|---------|
 | `output_dir` | No | Output directory for analyses | `~/.scv/analysis` |
-| `parallel` | No | Parallel execution for batchRun | `true` |
+| `batch_size` | No | Max concurrent subagents per batch for batchRun | `5` |
+| `parallel` | No | Parallel execution within a batch | `true` |
 | `fail_fast` | No | Stop on first error | `false` |
 
 **Remote Repository:**
@@ -352,8 +360,10 @@ A: Re-run the installation script to restore templates.
 SCV uses a skill-based architecture with:
 
 1. **SKILL.md** - Entry point that routes subcommands
-2. **references/** - Detailed implementation docs
+2. **references/** - Detailed implementation docs for each subcommand
 3. **templates/** - Document generation templates
+4. **scripts/** - Python helper scripts (`scv_util.py`, `batch_manager.py`, `git_op.py`)
+5. **project-analyzer agent** - Dedicated subagent that performs the actual code analysis
 
 Each language version (en, zh-cn) is self-contained in its own directory.
 
