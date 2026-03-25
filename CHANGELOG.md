@@ -5,6 +5,33 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.6.0] - 2026-03-25
+
+### Added
+- **Deep Analysis with codebones Integration**
+  - New progressive deep dive strategy: skeleton overview → targeted `codebones get` for full implementations
+  - `codebones get <symbol>` - Fetch complete source code of specific classes/methods on-demand
+  - `codebones search <query>` - Search symbols and trace dependencies across the codebase
+  - `codebones outline <path>` - Get file/directory structure without reading full content
+  - 85% token reduction compared to reading all files, while still getting full implementation details
+
+- **Enhanced project-analyzer Agent**
+  - Added `Bash` tool to execute codebones CLI commands during deep analysis
+  - New Phase 2.5 deep analysis workflow with on-demand code fetching
+  - Framework-specific extraction patterns (Java/Spring, Python/FastAPI, Go, Node.js/NestJS)
+  - Enhanced output sections: Service dependencies, API method chains, business rules from actual code
+
+### Changed
+- **Deep Analysis Workflow Refactored**
+  - Previously: Only generated skeleton file (85% token savings) but stopped there
+  - Now: Skeleton overview → identify key symbols → `codebones get` for actual implementations
+  - Deep analysis is now truly "deep" - fetches complete implementations when needed
+
+### Dependencies
+- **codebones** (optional): Required for deep analysis mode
+  - Install: `pip install codebones` or `cargo install codebones`
+  - GitHub: [https://github.com/creynir/codebones](https://github.com/creynir/codebones)
+
 ## [v0.5.0] - 2026-03-17
 
 ### Added
@@ -148,7 +175,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Project analyzer prompts and templates
 - Skills: `scv.run`, `scv.batchRun`, `scv.gather`
 
-[Unreleased]: https://github.com/projanvil/SCV/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/projanvil/SCV/compare/v0.6.0...HEAD
+[v0.6.0]: https://github.com/projanvil/SCV/compare/v0.5.0...v0.6.0
 [v0.5.0]: https://github.com/projanvil/SCV/compare/v0.4.1...v0.5.0
 [v0.4.1]: https://github.com/projanvil/SCV/compare/v0.4.0...v0.4.1
 [v0.4.0]: https://github.com/projanvil/SCV/compare/v0.3.0...v0.4.0

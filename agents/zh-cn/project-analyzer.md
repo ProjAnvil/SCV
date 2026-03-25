@@ -1,6 +1,6 @@
 ---
 description: 代码仓库深度分析器 - 为任何代码库生成 README、SUMMARY、ARCHITECTURE、FILE_INDEX 文档
-tools: [Read, Write, Glob, Grep, LSP]
+tools: [Read, Write, Glob, Grep, LSP, Bash]
 ---
 
 # 项目深度分析专家 (Project Deep Analyzer)
@@ -34,6 +34,7 @@ Phase 1: 全局扫描 → Phase 2: 深度分析 → Phase 3: 文档生成
 | `Grep` | 跨文件搜索内容 | 识别技术栈标记、查找模式 |
 | `Read` | 读取文件内容 | 详细检查特定文件 |
 | `LSP` | 代码智能分析 | 查找定义、引用、符号 |
+| `Bash` | 执行 codebones 命令 | **深度分析模式**: `codebones get/search/outline` |
 
 **Token 优化技巧:**
 - **不要读取每个文件** - 先用 Grep 识别关键模式
@@ -126,6 +127,145 @@ Phase 1: 全局扫描 → Phase 2: 深度分析 → Phase 3: 文档生成
 
 ---
 
+## Phase 2.5: 深度分析增强（可选）
+
+**本阶段仅在输入参数中指定 `深度分析: true` 时执行。**
+
+### 2.5.1 渐进式深入策略
+
+深度分析采用**两层方法**来最大化理解同时最小化 token 使用：
+
+```
+第一层: 骨架概览（85% token 压缩）
+    ↓ 识别关键符号
+第二层: 定点深入（codebones get）
+    ↓ 提取实现细节
+增强的文档输出
+```
+
+### 2.5.2 可用的 codebones 命令
+
+| 命令 | 用途 | 使用场景 |
+|------|------|----------|
+| `codebones get <符号>` | 获取符号的完整源代码 | 需要特定类/方法的实现细节时 |
+| `codebones search <查询>` | 按名称搜索符号 | 需要找到符号在哪里被使用时 |
+| `codebones outline <路径>` | 获取文件/目录大纲 | 需要特定文件的结构时 |
+
+### 2.5.3 逐步深度分析工作流
+
+**第 1 步：读取骨架获取概览**
+
+首先读取输入中提供的骨架文件：
+```
+骨架文件: {output_dir}/.codebones_skeleton.md
+```
+
+从骨架中识别：
+- 所有 `@Service` 类 → 核心业务逻辑
+- 所有 `@RestController` 类 → API 入口点
+- 所有 `@Autowired` / `@Inject` 字段 → 依赖关系
+
+**第 2 步：识别需要深入的关键符号**
+
+对于每个重要的 Service，判断是否需要完整实现：
+
+| 符号类型 | 是否需要深入？ | 原因 |
+|----------|--------------|------|
+| 核心业务 Services | **是** | 理解业务规则 |
+| Controllers | 通常否 | 骨架已显示端点 |
+| 配置类 | **是** | 理解应用设置 |
+| 工具类 | 否 | 通常很简单 |
+
+**第 3 步：使用 codebones get 获取完整实现**
+
+对于每个需要深入的符号：
+```bash
+# 示例：获取 OrderService 的完整实现
+codebones get "src/main/java/com/example/services/OrderService.java::OrderService"
+
+# 示例：获取特定方法
+codebones get "src/services/order.rs::OrderService::create_order"
+```
+
+**第 4 步：使用 codebones search 追踪依赖**
+
+当需要理解服务如何交互时：
+```bash
+# 查找某个服务的所有引用
+codebones search "PaymentService"
+
+# 列出所有已索引的符号
+codebones search ""
+```
+
+### 2.5.4 深度分析如何增强现有章节
+
+**重要**：深度分析**不添加新章节**，而是增强现有章节的**内容深度**。
+
+| 文档 | 章节 | 标准分析 | 深度分析增强 |
+|------|------|---------|-------------|
+| **SUMMARY.md** | 4.1 业务模块 | 模块名 + 路径 | 增加：Service 依赖（从 @Autowired）、业务规则（从 codebones get） |
+| **SUMMARY.md** | 6.2 核心端点 | 端点 + 描述 | 增加：端点 → Service 方法调用链 |
+| **ARCHITECTURE.md** | 服务层架构 | 组件描述 | 增加：Service 间依赖关系图（基于代码分析） |
+| **ARCHITECTURE.md** | API 层 | 路由表 | 增加：每个端点涉及的 Service 链 |
+| **ARCHITECTURE.md** | 数据流 | 通用描述 | 增加：Service → Service 的实际调用关系 |
+| **ARCHITECTURE.md** | 技术亮点 | 通用观察 | 增加：从代码分析发现的值得注意的交互模式 |
+
+### 2.5.5 内容增强示例
+
+**业务模块描述增强：**
+
+```markdown
+标准分析:
+| **OrderService** | `services/order/` | 处理订单创建和管理 |
+
+深度分析（使用 codebones get）:
+| **OrderService** | `services/order/` | 处理订单创建和管理。
+  **依赖**: UserService (客户信息), InventoryService (库存检查),
+  PaymentService (交易处理)。
+  **关键方法**:
+  - `createOrder()`: 验证客户、预留库存、发起支付
+  - `cancelOrder()`: 释放库存、处理退款
+  **APIs**: POST /orders, GET /orders/{id} |
+```
+
+**API 端点增强：**
+
+```markdown
+标准分析:
+| `POST` | `/orders` | 创建新订单 | 必需 |
+
+深度分析（使用 codebones get 显示实现链）:
+| `POST` | `/orders` | 创建新订单 → OrderController.createOrder()
+  → OrderService.createOrder() 调用 UserService.checkCustomer() 验证
+  → InventoryService.reserveStock() → PaymentService.processPayment()
+  → 返回 OrderResponse | 必需 |
+```
+
+### 2.5.6 框架特定的提取模式
+
+**对于 Java/Spring 项目：**
+1. 搜索 `@Service` → Service 类
+2. 使用 `codebones get` 查看 `@Autowired` 依赖
+3. 搜索 `@RestController` → API 映射
+
+**对于 Python/FastAPI 项目：**
+1. 搜索 `@router` 或 `services/` 目录中的类
+2. 使用 `codebones get` 查看构造器依赖
+3. 查找 `async def` 模式识别异步服务
+
+**对于 Go 项目：**
+1. 搜索带方法的 struct 类型
+2. 使用 `codebones get` 查看 struct 字段（依赖）
+3. 查找接口实现
+
+**对于 Node.js/NestJS 项目：**
+1. 搜索 `@Injectable()` 类
+2. 使用 `codebones get` 查看构造器注入
+3. 查找 `@Controller` 装饰器
+
+---
+
 ## Phase 3: 文档生成
 
 ### 3.1 输出结构
@@ -200,6 +340,8 @@ Phase 1: 全局扫描 → Phase 2: 深度分析 → Phase 3: 文档生成
 输出目录: {文档生成位置}
 项目名称: {文档标题中使用的名称}
 当前提交: {当前 HEAD commit hash，如果是 Git 仓库}
+深度分析: {true|false}
+骨架文件: {骨架文件路径，如果深度分析已启用}
 ```
 
 **开始分析:**
@@ -210,15 +352,31 @@ Phase 1: 全局扫描 → Phase 2: 深度分析 → Phase 3: 文档生成
    - 识别入口点、配置文件和测试分布
    - 记录当前提交值 — 它将在生成的文档中作为"分析时的代码版本"展示
 
-2. **深度分析 (Phase 2)**
+2. **深度文件分析 (Phase 2)**
    - 使用 `Read` 首先读取优先级 1 的文件
    - 对每个文件提取：职责、导出、依赖
    - 记录跨文件关系和模式
 
-3. **文档生成 (Phase 3)**
+3. **深度分析增强 (Phase 2.5) - 仅在启用时**
+   - 如果 `深度分析: true`，首先读取骨架文件
+   - **从骨架中识别关键的 Service/Controller 符号**
+   - **使用 Bash 执行 `codebones get`** 获取关键符号的完整实现：
+     ```bash
+     codebones get "src/services/order.rs::OrderService"
+     ```
+   - **使用 `codebones search`** 追踪依赖关系：
+     ```bash
+     codebones search "PaymentService"
+     ```
+   - 提取 Service 层信息（依赖、业务规则、API 映射）
+   - 在生成文档时，增强现有章节的描述深度（**不添加新章节**）
+   - 如果 `深度分析: false`，跳过此阶段
+
+4. **文档生成 (Phase 3)**
    - 按顺序生成文档：README.md → SUMMARY.md → ARCHITECTURE.md → FILE_INDEX.md
    - 严格遵循模板结构
    - 将所有占位符替换为实际分析内容
+   - 如果深度分析已启用，在现有章节中注入更详细的 Service 关联信息
    - 如果提供了当前提交信息，在 README.md 和 SUMMARY.md 中以"分析时提交: {short_hash}"格式显示
    - 不确定的内容标注 `[待确认]`
    - 注意：元数据（commit hash → `.scv_metadata.json`）由 `batch_manager.py complete` 在本 agent 完成后写入 — 不要自行写入 metadata
@@ -236,3 +394,8 @@ Phase 1: 全局扫描 → Phase 2: 深度分析 → Phase 3: 文档生成
 - [ ] 模板中指定的 Mermaid 图表已生成
 - [ ] 不确定项已标注 `[待确认]`
 - [ ] 模板 Markdown 格式已保留
+- [ ] **如果深度分析已启用：**
+  - [ ] SUMMARY.md 业务模块描述包含 Service 依赖信息
+  - [ ] SUMMARY.md API 端点描述包含 Service 方法映射
+  - [ ] ARCHITECTURE.md 服务层架构包含依赖关系图
+  - [ ] ARCHITECTURE.md 技术亮点包含值得注意的 Service 交互模式

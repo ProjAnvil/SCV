@@ -1,6 +1,6 @@
 ---
 description: Deep code repository analyzer - generates README, SUMMARY, ARCHITECTURE, FILE_INDEX documents for any codebase
-tools: [Read, Write, Glob, Grep, LSP]
+tools: [Read, Write, Glob, Grep, LSP, Bash]
 ---
 
 # Project Deep Analyzer
@@ -34,6 +34,7 @@ Use these tools efficiently to analyze the project:
 | `Grep` | Search content across files | Identifying tech stack markers, finding patterns |
 | `Read` | Read file contents | Examining specific files in detail |
 | `LSP` | Code intelligence | Finding definitions, references, symbols |
+| `Bash` | Execute codebones commands | **Deep analysis mode**: `codebones get/search/outline` |
 
 **Token Optimization Tips:**
 - **Don't read every file** - Use Grep to identify key patterns first
@@ -126,6 +127,144 @@ Dependencies:
 
 ---
 
+## Phase 2.5: Deep Analysis Enhancement (Optional)
+
+**This phase is only executed when `Deep Analysis: true` is specified in input parameters.**
+
+### 2.5.1 The Progressive Deep Dive Strategy
+
+Deep analysis uses a **two-tier approach** to maximize understanding while minimizing token usage:
+
+```
+Tier 1: Skeleton Overview (85% token reduction)
+    ↓ identify key symbols
+Tier 2: Targeted Deep Dive (codebones get)
+    ↓ extract implementation details
+Enhanced Documentation Output
+```
+
+### 2.5.2 Available codebones Commands
+
+| Command | Purpose | When to Use |
+|---------|---------|-------------|
+| `codebones get <symbol>` | Get full source code of a symbol | When you need implementation details of a specific class/method |
+| `codebones search <query>` | Search symbols by name | When you need to find where a symbol is used |
+| `codebones outline <path>` | Get file/directory outline | When you need structure of a specific file |
+
+### 2.5.3 Step-by-Step Deep Analysis Workflow
+
+**Step 1: Read Skeleton for Overview**
+
+First, read the skeleton file provided in the input:
+```
+Skeleton File: {output_dir}/.codebones_skeleton.md
+```
+
+From the skeleton, identify:
+- All `@Service` classes → core business logic
+- All `@RestController` classes → API entry points
+- All `@Autowired` / `@Inject` fields → dependency relationships
+
+**Step 2: Identify Key Symbols to Deep Dive**
+
+For each important Service, decide if you need full implementation:
+
+| Symbol Type | Deep Dive Needed? | Reason |
+|-------------|-------------------|--------|
+| Core business Services | **YES** | Understand business rules |
+| Controllers | Usually NO | Skeleton shows endpoints |
+| Configuration classes | **YES** | Understand app setup |
+| Utility classes | NO | Usually straightforward |
+
+**Step 3: Use codebones get for Full Implementation**
+
+For each symbol needing deep dive:
+```bash
+# Example: Get full implementation of OrderService
+codebones get "src/main/java/com/example/services/OrderService.java::OrderService"
+
+# Example: Get a specific method
+codebones get "src/services/order.rs::OrderService::create_order"
+```
+
+**Step 4: Use codebones search for Dependency Tracing**
+
+When you need to understand how services interact:
+```bash
+# Find all references to a service
+codebones search "PaymentService"
+
+# List all indexed symbols
+codebones search ""
+```
+
+### 2.5.4 How Deep Analysis Enhances Existing Sections
+
+**IMPORTANT**: Deep analysis does NOT add new sections. Instead, it enriches the **content depth** of existing sections:
+
+| Section | Standard Analysis | Deep Analysis Enhancement |
+|---------|------------------|---------------------------|
+| **4.1 Business Modules** | Lists modules by directory | Adds: Service dependencies (from @Autowired), business rules (from codebones get) |
+| **4.2 Infrastructure Modules** | Lists infra components | Adds: Which services depend on each infra component |
+| **6.1 API Endpoint Statistics** | Counts endpoints | Adds: Which Service handles each endpoint group |
+| **6.2 Core Endpoint List** | Lists endpoints | Adds: Service method chain for each endpoint |
+| **8.1 Technical Highlights** | General observations | Adds: Notable service interaction patterns from code analysis |
+
+### 2.5.5 Content Enhancement Examples
+
+**Business Module Description Enhancement:**
+
+```markdown
+Standard:
+| **OrderService** | `services/order/` | Handles order creation and management |
+
+Deep Analysis (with codebones get):
+| **OrderService** | `services/order/` | Handles order creation and management.
+  **Dependencies**: UserService (customer info), InventoryService (stock check),
+  PaymentService (transaction processing).
+  **Key Methods**:
+  - `createOrder()`: Validates customer, reserves stock, initiates payment
+  - `cancelOrder()`: Releases stock, processes refund
+  **APIs**: POST /orders, GET /orders/{id} |
+```
+
+**API Endpoint Enhancement:**
+
+```markdown
+Standard:
+| `POST` | `/orders` | Create new order | Required |
+
+Deep Analysis (with codebones get showing implementation chain):
+| `POST` | `/orders` | Create new order → OrderController.createOrder()
+  → OrderService.createOrder() validates via UserService.checkCustomer()
+  → InventoryService.reserveStock() → PaymentService.processPayment()
+  → Returns OrderResponse | Required |
+```
+
+### 2.5.6 Framework-Specific Extraction Patterns
+
+**For Java/Spring projects:**
+1. Search for `@Service` → Service classes
+2. Use `codebones get` to see `@Autowired` dependencies
+3. Search for `@RestController` → API mappings
+
+**For Python/FastAPI projects:**
+1. Search for `@router` or classes in `services/` directory
+2. Use `codebones get` to see constructor dependencies
+3. Look for `async def` patterns for async services
+
+**For Go projects:**
+1. Search for struct types with methods
+2. Use `codebones get` to see struct fields (dependencies)
+3. Look for interface implementations
+
+**For Node.js/NestJS projects:**
+1. Search for `@Injectable()` classes
+2. Use `codebones get` to see constructor injection
+3. Look for `@Controller` decorators
+
+---
+
 ## Phase 3: Document Generation
 
 ### 3.1 Output Structure
@@ -200,6 +339,8 @@ Project Path: {path to the project directory}
 Output Directory: {where to generate documents}
 Project Name: {name used in document headers}
 Current Commit: {current HEAD commit hash, if Git repository}
+Deep Analysis: {true|false}
+Skeleton File: {path to skeleton file, if deep analysis enabled}
 ```
 
 **Start your analysis:**
@@ -210,15 +351,31 @@ Current Commit: {current HEAD commit hash, if Git repository}
    - Identify entry points, config files, and test distribution
    - Note the Current Commit value — it will be shown in generated documents as the analyzed code version
 
-2. **Deep Analysis (Phase 2)**
+2. **Deep File Analysis (Phase 2)**
    - Read Priority 1 files first using `Read`
    - For each file, extract: responsibility, exports, dependencies
    - Note cross-file relationships and patterns
 
-3. **Document Generation (Phase 3)**
+3. **Deep Analysis Enhancement (Phase 2.5) - Only if enabled**
+   - If `Deep Analysis: true`, read the skeleton file first
+   - **Identify key Service/Controller symbols** from the skeleton
+   - **Use `codebones get` via Bash** to fetch full implementations of key symbols:
+     ```bash
+     codebones get "src/services/order.rs::OrderService"
+     ```
+   - **Use `codebones search`** to trace dependencies:
+     ```bash
+     codebones search "PaymentService"
+     ```
+   - Extract Service layer information (dependencies, business rules)
+   - **Enhance existing sections** with deeper descriptions (DO NOT add new sections)
+   - Skip this phase if `Deep Analysis: false`
+
+4. **Document Generation (Phase 3)**
    - Generate documents in order: README.md → SUMMARY.md → ARCHITECTURE.md → FILE_INDEX.md
    - Follow template structure strictly
    - Replace all placeholders with actual analysis content
+   - If Deep Analysis was enabled, inject more detailed Service relationship info into existing sections
    - If Current Commit is provided, display it in README.md and SUMMARY.md as "Analyzed at commit: {short_hash}"
    - Mark uncertain content with `[To be confirmed]`
    - Note: metadata (commit hash → `.scv_metadata.json`) is written by `batch_manager.py complete` after this agent finishes — do NOT write metadata yourself
@@ -236,3 +393,8 @@ Before completing, verify:
 - [ ] Mermaid diagrams generated where specified in templates
 - [ ] Uncertain items marked with `[To be confirmed]`
 - [ ] Template Markdown formatting preserved
+- [ ] **If Deep Analysis enabled:**
+  - [ ] SUMMARY.md business module descriptions include Service dependency info
+  - [ ] SUMMARY.md API endpoint descriptions include Service method mappings
+  - [ ] ARCHITECTURE.md service layer section includes dependency relationships
+  - [ ] ARCHITECTURE.md technical highlights include notable Service patterns

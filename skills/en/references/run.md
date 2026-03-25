@@ -119,7 +119,61 @@ If no arguments, show usage and exit.
    Launching project-analyzer subagent...
    ```
 
-### Step 5: Launch project-analyzer Subagent
+### Step 5: Check Deep Analysis Requirements
+
+**Read configuration file** to check `deep_analysis_enabled`:
+
+```bash
+cat ~/.scv/config.json 2>/dev/null | grep -q '"deep_analysis_enabled"[[:space:]]*:[[:space:]]*true'
+```
+
+**If `deep_analysis_enabled` is `true`:**
+
+1. **Check if codebones is installed:**
+
+   ```bash
+   which codebones
+   ```
+
+   Exit code 0 = installed, Exit code 1 = not installed
+
+2. **If codebones is NOT installed:**
+
+   ```
+   ⚠️ Deep analysis is enabled but codebones is not installed.
+
+   Install:
+     pip install codebones
+     # or
+     cargo install codebones
+
+   Would you like to:
+   1. Install codebones now
+   2. Continue with standard analysis
+   3. Cancel
+   ```
+
+3. **If codebones IS installed, prepare deep analysis infrastructure:**
+
+   ```bash
+   # Build index first (required for all codebones operations)
+   codebones index {analysis_path}
+
+   # Generate skeleton for overview (85% token reduction)
+   codebones pack {analysis_path} --format markdown --max-tokens 100000 > ~/.scv/analysis/{repo_name}/.codebones_skeleton.md
+   ```
+
+   Set:
+   - `use_deep_analysis = true`
+   - `skeleton_file = ~/.scv/analysis/{repo_name}/.codebones_skeleton.md`
+   - `repo_path = {analysis_path}` (for codebones get/search operations)
+
+**If `deep_analysis_enabled` is `false` or not set:**
+
+- Set `use_deep_analysis = false`
+- Continue with standard analysis
+
+### Step 6: Launch project-analyzer Subagent
 
 **Launch the specialized subagent:**
 
@@ -136,15 +190,63 @@ Agent(
   - Project Name: {project_name}
   - Current Commit: {current_commit or 'N/A'}
   - Templates Directory: {skill_path}/references/templates/
+  - Deep Analysis: {use_deep_analysis}
+  - Skeleton File: {skeleton_file_path if use_deep_analysis else 'N/A'}
 
   Execute the 3-phase analysis workflow:
   1. Phase 1: Global Scan - Identify tech stack and structure
   2. Phase 2: Deep File Analysis - Analyze priority files
   3. Phase 3: Document Generation - Create 4 documents
 
+  <!-- IF use_deep_analysis -->
+  **Deep Analysis Mode Enabled - Progressive Deep Dive Strategy:**
+
+  You have access to `codebones` CLI for token-efficient deep analysis:
+
+  **Step 1: Read skeleton for overview (85% token reduction)**
+  ```
+  Read file: {skeleton_file_path}
+  ```
+  This gives you all class signatures, dependencies, and API mappings.
+
+  **Step 2: Identify key symbols to deep dive**
+  From the skeleton, identify:
+  - Core Service classes (business logic)
+  - Controller classes (API endpoints)
+  - Critical configuration classes
+
+  **Step 3: Use codebones get for full implementation (on-demand)**
+  For each key symbol you need to understand deeply:
+  ```bash
+  # Get full source code of a specific class/method
+  codebones get "path/to/file.rs::ClassName"
+  codebones get "src/services/order.rs::OrderService.create_order"
+  codebones get "src/controllers/user_controller.rs::UserController"
+  ```
+
+  **Step 4: Use codebones search to find related symbols**
+  ```bash
+  # Find all symbols containing "Order"
+  codebones search "Order"
+
+  # List all indexed symbols
+  codebones search ""
+  ```
+
+  **Example deep dive workflow:**
+  1. Skeleton shows `OrderService` has `@Autowired InventoryService`
+  2. Use `codebones get "src/services/order.rs::OrderService"` to see full implementation
+  3. See `create_order` method calls `inventory.check_stock`
+  4. Use `codebones search "InventoryService"` to find all usages
+  5. Document the service interaction chain
+
+  This progressive approach saves ~85% tokens compared to reading all files,
+  while still getting full implementation details where needed.
+  <!-- END IF -->
+
   Generate these documents in the output directory:
   - README.md - Project overview
-  - SUMMARY.md - 5-minute summary
+  - SUMMARY.md - 5-minute summary (include Service Business Association if deep analysis)
   - ARCHITECTURE.md - Architecture design
   - FILE_INDEX.md - File index
 
@@ -158,7 +260,7 @@ Agent(
 - **Consistent Quality**: Same analysis engine for both single and batch runs
 - **Token Efficiency**: Large codebase analysis doesn't pollute main context
 
-### Step 6: Write Metadata (Git repositories only)
+### Step 7: Write Metadata (Git repositories only)
 
 After the subagent completes successfully, record the analyzed commit so future runs can skip unchanged repos:
 
@@ -171,7 +273,7 @@ python3 ~/.claude/skills/scv/scripts/scv_util.py write-metadata \
 
 Skip this step if `current_commit` is null (non-Git directory) or if the subagent failed.
 
-### Step 7: Completion Report
+### Step 8: Completion Report
 
 After subagent completes, display:
 
@@ -184,6 +286,9 @@ Repository information:
   🌿 Branch: {branch} (for Git repositories)
   📦 Latest commit: {commit_hash} - {commit_message} (for Git repositories)
 
+Analysis mode:
+  🔍 Deep Analysis: {use_deep_analysis ? 'Enabled (codebones skeleton)' : 'Standard'}
+
 Output directory:
   📂 ~/.scv/analysis/{repo_name}/
 
@@ -192,6 +297,10 @@ Generated documents:
   📄 SUMMARY.md       - 5-minute summary
   📄 ARCHITECTURE.md  - Architecture details
   📄 FILE_INDEX.md    - File index
+
+<!-- IF use_deep_analysis -->
+Service Business Association section included in SUMMARY.md
+<!-- END IF -->
 
 Next steps:
   - Review generated documents

@@ -35,12 +35,19 @@
 - 📊 **深度代码分析**：为任何代码库生成全面的文档
 - 🚀 **并行处理**：使用 subagent 同时分析多个仓库（最大并发 5 个）
 - ⚡ **增量分析**：自动跳过 HEAD commit 未变化的仓库，无需重复分析
+- 🔍 **深度分析模式**：集成 [codebones](https://github.com/creynir/codebones) 实现 token 高效的代码探索
 - 📝 **多种输出格式**：README、摘要、架构、文件索引
 - 🤖 **远程仓库自动拉取**：始终分析最新代码
 - 🎯 **灵活配置**：支持远程和本地仓库
 - 🌐 **多语言支持**：英文和中文 skill 可选
 
 ## 安装
+
+### 前置要求
+
+- **Claude Code CLI** - [安装指南](https://github.com/anthropics/claude-code)
+- **codebones**（可选，用于深度分析）- Token 高效的代码探索工具
+  > codebones 可在深度分析时实现 85% token 压缩。未安装时，深度分析将回退到标准文件读取。
 
 ### 快速安装（推荐）
 
@@ -62,6 +69,24 @@
 - 复制配置文件
 - 安装所选语言的 skill 到 `~/.claude/skills/scv`
 - 安装 `project-analyzer` agent 到 `~/.claude/agents/`
+
+### 安装 codebones（可选，用于深度分析）
+
+```bash
+# 方式 1: pip
+pip install codebones
+
+# 方式 2: cargo
+cargo install codebones
+
+# 验证安装
+codebones --version
+```
+
+> **什么是 codebones？** [codebones](https://github.com/creynir/codebones) 是一个 CLI 工具，可将代码精简为结构骨架，实现 85% token 压缩同时保留所有类签名、依赖关系和 API 映射。启用深度分析时，SCV 使用 codebones：
+> - 生成压缩的骨架概览
+> - 按需获取特定符号的完整实现（`codebones get`）
+> - 搜索符号并追踪依赖（`codebones search`）
 
 ### 安装后目录结构
 

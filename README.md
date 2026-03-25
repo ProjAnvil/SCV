@@ -30,12 +30,26 @@
 - 📊 **Deep Code Analysis**: Generate comprehensive documentation for any codebase
 - 🚀 **Parallel Processing**: Analyze multiple repositories simultaneously with subagents
 - ⚡ **Incremental Analysis**: Skip repos whose HEAD commit hasn't changed since last analysis
+- 🔍 **Deep Analysis Mode**: Token-efficient code exploration with [codebones](https://github.com/yuhaochen0902/codebones) integration
 - 📝 **Multiple Output Formats**: README, Summary, Architecture, File Index
 - 🤖 **Auto-Pull for Remote Repos**: Always analyze the latest code
 - 🎯 **Flexible Configuration**: Support both remote and local repositories
 - 🌐 **Multi-Language Support**: English and Chinese skills available
 
 ## Installation
+
+### Prerequisites
+
+- **Claude Code CLI** - [Installation Guide](https://github.com/anthropics/claude-code)
+- **codebones** (optional, for deep analysis) - Token-efficient code exploration tool
+  ```bash
+  # Install via pip
+  pip install codebones
+
+  # Or install via cargo
+  cargo install codebones
+  ```
+  > codebones enables 85% token reduction during deep analysis. Without it, deep analysis falls back to standard file reading.
 
 ### Quick Install (Recommended)
 
@@ -57,6 +71,24 @@ The script will:
 - Copy the configuration file
 - Install the language-specific skill to `~/.claude/skills/scv`
 - Install the `project-analyzer` agent to `~/.claude/agents/`
+
+### Install codebones (Optional, for Deep Analysis)
+
+```bash
+# Option 1: pip
+pip install codebones
+
+# Option 2: cargo
+cargo install codebones
+
+# Verify installation
+codebones --version
+```
+
+> **What is codebones?** [codebones](https://github.com/creynir/codebones) is a CLI tool that strips code down to its structural skeleton, enabling 85% token reduction while preserving all class signatures, dependencies, and API mappings. When deep analysis is enabled, SCV uses codebones to:
+> - Generate compressed skeleton overview
+> - Fetch specific symbol implementations on-demand (`codebones get`)
+> - Search symbols and trace dependencies (`codebones search`)
 
 ### Directory Structure After Installation
 
