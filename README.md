@@ -30,7 +30,7 @@
 - 📊 **Deep Code Analysis**: Generate comprehensive documentation for any codebase
 - 🚀 **Parallel Processing**: Analyze multiple repositories simultaneously with subagents
 - ⚡ **Incremental Analysis**: Skip repos whose HEAD commit hasn't changed since last analysis
-- 🔍 **Deep Analysis Mode**: Token-efficient code exploration with [codebones](https://github.com/yuhaochen0902/codebones) integration
+- 🔍 **Deep Analysis Mode**: Token-efficient code exploration with [codebones](https://github.com/creynir/codebones) integration
 - 📝 **Multiple Output Formats**: README, Summary, Architecture, File Index
 - 🤖 **Auto-Pull for Remote Repos**: Always analyze the latest code
 - 🎯 **Flexible Configuration**: Support both remote and local repositories
