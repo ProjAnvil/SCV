@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.6.1] - 2026-03-27
+
+### Added
+- **Multi-language installer support**
+  - `install.sh` now accepts `--lang` parameter (`en` or `zh-cn`)
+  - Default language is English (`en`)
+  - Usage: `./install.sh --lang=zh-cn` or `./install.sh --lang zh-cn`
+
+- **New config options in config.example.json**
+  - `batch_size`: Control parallel analysis batch size (default: 5)
+  - `deep_analysis_enabled`: Toggle deep analysis mode (default: false)
+
 ## [v0.6.0] - 2026-03-25
 
 ### Added

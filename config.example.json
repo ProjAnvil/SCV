@@ -1,5 +1,7 @@
 {
   "output_dir": "~/.scv/analysis",
+  "batch_size": 5,
+  "deep_analysis_enabled": false,
   "repos": [
     {
       "type": "remote",
