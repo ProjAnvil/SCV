@@ -194,6 +194,10 @@ else
     cp "$SCRIPT_DIR/config.example.json" "$SCV_DATA_DIR/config.json"
     echo -e "${GREEN}+${NC} config.json (copied)"
 fi
+else
+    cp "$SCRIPT_DIR/config.example.json" "$SCV_DATA_DIR/config.json"
+    echo -e "${GREEN}+${NC} config.json (copied)"
+fi
 
 # Step 2: Create Claude directories
 echo -e "\n${BLUE}Step 2: Creating Claude directories${NC}"

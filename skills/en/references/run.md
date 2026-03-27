@@ -192,6 +192,7 @@ Agent(
   - Templates Directory: {skill_path}/references/templates/
   - Deep Analysis: {use_deep_analysis}
   - Skeleton File: {skeleton_file_path if use_deep_analysis else 'N/A'}
+  - AI Model: Use your actual model name from the system context (e.g., claude-sonnet-4-6)
 
   Execute the 3-phase analysis workflow:
   1. Phase 1: Global Scan - Identify tech stack and structure
@@ -251,6 +252,7 @@ Agent(
   - FILE_INDEX.md - File index
 
   Follow the templates strictly and mark uncertain items with [To be confirmed].
+  When filling README.md, replace `{AI Model Name}` with your actual model name from the system context.
   """
 )
 ```

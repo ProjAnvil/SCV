@@ -187,6 +187,7 @@ Agent(
   - 模板目录: {skill_path}/references/templates/
   - 深度分析: {use_deep_analysis}
   - 骨架文件: {skeleton_file_path if use_deep_analysis else 'N/A'}
+  - AI 模型: 使用系统上下文中的实际模型名称（如 claude-sonnet-4-6）
 
   执行 3 阶段分析工作流：
   1. Phase 1: 全局扫描 - 识别技术栈和结构
@@ -241,6 +242,7 @@ Agent(
   - FILE_INDEX.md - 文件索引
 
   严格遵循模板格式，不确定项标记 [待确认]。
+  填写 README.md 时，将 `{AI 模型名称}` 替换为系统上下文中的实际模型名称。
   """
 )
 ```
