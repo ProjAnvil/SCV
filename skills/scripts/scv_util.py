@@ -10,6 +10,7 @@ Commands:
   get-commit-info  --repo <path>
   check-skip       --repo <path> --output-dir <path>
   write-metadata   --repo <path> --commit <hash> --output-dir <path>
+  update-index     [--analysis-dir <path>] [--project-dir <path>]
 
 Exit codes for check-skip:
   0  analysis needed
@@ -19,6 +20,7 @@ Exit codes for check-skip:
 
 import argparse
 import json
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -166,9 +168,9 @@ def cmd_check_skip(args):
                 "skip": True,
                 "reason": reason,
                 "commit": info["short_hash"],
-                "last_analyzed_at": existing.get("last_analyzed_at")
-                if existing
-                else None,
+                "last_analyzed_at": (
+                    existing.get("last_analyzed_at") if existing else None
+                ),
             }
         )
         sys.exit(2)
@@ -202,6 +204,109 @@ def cmd_write_metadata(args):
     )
 
 
+# ---------------------------------------------------------------------------
+# Index management
+# ---------------------------------------------------------------------------
+
+
+def cmd_update_index(args):
+    """Write ~/.scv/index.md from AI-provided entries JSON.
+
+    Accepts --entries-json as a JSON array of objects with keys:
+      name     — project directory name
+      summary  — one-sentence description
+      keywords — comma/、-separated functional keywords (or "-")
+
+    Language is read from ~/.scv/config.json ("lang": "zh-cn" | "en").
+    Falls back to "en" if not set.
+    """
+    analysis_dir = Path(args.analysis_dir or "~/.scv/analysis").expanduser()
+
+    # Read language from config
+    config_path = analysis_dir.parent / "config.json"
+    lang = "en"
+    if config_path.exists():
+        try:
+            cfg = json.loads(config_path.read_text(encoding="utf-8"))
+            lang = cfg.get("lang", "en")
+        except Exception:
+            pass
+
+    try:
+        entries = json.loads(args.entries_json)
+    except (json.JSONDecodeError, TypeError) as e:
+        _die(f"--entries-json is not valid JSON: {e}")
+        return
+
+    if not isinstance(entries, list):
+        _die("--entries-json must be a JSON array")
+        return
+
+    index_path = analysis_dir.parent / "index.md"
+    repos_dir = analysis_dir.parent / "repos"
+    timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+
+    if lang == "zh-cn":
+        lines = [
+            "# SCV 分析索引",
+            "",
+            "## 目录结构",
+            "",
+            "| 目录 | 内容 |",
+            "|------|------|",
+            f"| `{repos_dir}/` | 源代码仓库 |",
+            f"| `{analysis_dir}/` | 代码分析文档 |",
+            "",
+            "---",
+            "",
+            "## 项目索引",
+            "",
+            f"> 自动生成 · {timestamp}",
+            "",
+            "| # | 项目 | 简介 | 功能职责 |",
+            "|---|------|------|--------|",
+        ]
+    else:
+        lines = [
+            "# SCV Analysis Index",
+            "",
+            "## Directory Structure",
+            "",
+            "| Directory | Contents |",
+            "|-----------|----------|",
+            f"| `{repos_dir}/` | Source code repositories |",
+            f"| `{analysis_dir}/` | Code analysis documents |",
+            "",
+            "---",
+            "",
+            "## Project Index",
+            "",
+            f"> Auto-generated · {timestamp}",
+            "",
+            "| # | Project | Summary | Responsibilities |",
+            "|---|---------|---------|-----------------|",
+        ]
+
+    for i, entry in enumerate(entries, 1):
+        name = str(entry.get("name", "")).replace("|", "\\|")
+        summary = str(entry.get("summary", "")).replace("|", "\\|")
+        keywords = str(entry.get("keywords", "-")).replace("|", "\\|")
+        lines.append(f"| {i} | {name} | {summary} | {keywords} |")
+
+    lines.append("")
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    index_path.write_text("\n".join(lines), encoding="utf-8")
+
+    _ok(
+        {
+            "status": "index_updated",
+            "index_file": str(index_path),
+            "total_projects": len(entries),
+            "lang": lang,
+        }
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(
         description="SCV Utility — metadata management and commit inspection"
@@ -220,11 +325,26 @@ def main():
     p_wm.add_argument("--commit", required=True)
     p_wm.add_argument("--output-dir", required=True)
 
+    p_ui = sub.add_parser(
+        "update-index", help="Write ~/.scv/index.md from AI-provided entries"
+    )
+    p_ui.add_argument(
+        "--analysis-dir",
+        default=None,
+        help="Analysis root dir (default: ~/.scv/analysis)",
+    )
+    p_ui.add_argument(
+        "--entries-json",
+        required=True,
+        help='JSON array of {"name","summary","keywords"} objects',
+    )
+
     args = parser.parse_args()
     {
         "get-commit-info": cmd_get_commit_info,
         "check-skip": cmd_check_skip,
         "write-metadata": cmd_write_metadata,
+        "update-index": cmd_update_index,
     }[args.command](args)
 
 

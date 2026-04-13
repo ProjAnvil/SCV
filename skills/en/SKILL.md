@@ -7,12 +7,14 @@ description: |
   - run <path|url>: Analyze a single repository, generate 4 structured documents
   - batchRun: Batch analyze multiple repositories (parallel execution with subagents)
   - gather <options>: Clone/update/manage remote Git repositories
+  - index: Rebuild the analysis index (~/.scv/index.md)
 
-  Use this skill when users need to:
+  Use this skill when users need:
   - Analyze codebase structure and technology stack
   - Generate project documentation (README, SUMMARY, ARCHITECTURE, FILE_INDEX)
   - Batch analyze multiple repositories
   - Manage remote repository clones
+  - View or rebuild the project analysis index
 
   Triggers: analyze code, generate docs, repository analysis, project documentation, batch analysis
 ---
@@ -29,6 +31,7 @@ Parse the first argument as subcommand:
 /scv run <repo_path|url> [project_name]
 /scv batchRun
 /scv gather <options>
+/scv index
 ```
 
 | Subcommand | Function | Reference |
@@ -36,6 +39,7 @@ Parse the first argument as subcommand:
 | `run` | Single repository analysis | Read `references/run.md` |
 | `batchRun` | Batch parallel analysis | Read `references/batchRun.md` |
 | `gather` | Repository management | Read `references/gather.md` |
+| `index` | Rebuild analysis index | Read `references/index.md` |
 
 ## Execution Flow
 
@@ -44,6 +48,7 @@ Parse the first argument as subcommand:
    - `run` → `references/run.md`
    - `batchRun` → `references/batchRun.md`
    - `gather` → `references/gather.md`
+   - `index` → `references/index.md`
 3. **Execute subcommand logic**
 
 ## Core Resources
@@ -57,6 +62,7 @@ All analysis uses these resources (located within this skill):
 | Config File | `~/.scv/config.json` | Repository list and settings |
 | Repo Storage | `~/.scv/repos/` | Cloned remote repositories |
 | Analysis Output | `~/.scv/analysis/` | Generated documents |
+| Analysis Index | `~/.scv/index.md` | One-line summary per project |
 
 ## Output Structure
 

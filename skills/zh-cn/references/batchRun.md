@@ -320,7 +320,15 @@ python3 ~/.claude/skills/scv/scripts/batch_manager.py next --session {SESSION_ID
 🔍 分析单仓库:  /scv run <repo_path>
 🔄 重新运行:    /scv batchRun
 📋 列出仓库:    /scv gather --list
+📇 查看索引:    cat ~/.scv/index.md
 ```
+
+### Step 6.5: 更新分析索引
+
+所有批次完成后，重建全局索引文件。按照 `references/index.md` 中的完整步骤执行：
+列出所有项目目录 → 逐个读取 README 提取摘要和功能职责关键词 → 组装 entries JSON → 调用脚本写入 `~/.scv/index.md`。
+
+详见：`references/index.md`
 
 ---
 

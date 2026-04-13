@@ -320,7 +320,15 @@ Failed:
 🔍 Single repo:    /scv run <repo_path>
 🔄 Re-run:         /scv batchRun
 📋 List repos:     /scv gather --list
+📇 View index:     cat ~/.scv/index.md
 ```
+
+### Step 6.5: Update Analysis Index
+
+After all batches complete, rebuild the global index file. Follow the full steps in `references/index.md`:
+List all project directories → read each README to extract summary and functional keywords → assemble entries JSON → call the script to write `~/.scv/index.md`.
+
+See: `references/index.md`
 
 ---
 

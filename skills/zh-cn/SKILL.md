@@ -7,12 +7,14 @@ description: |
   - run <path|url>: 分析单个仓库，生成 4 个结构化文档
   - batchRun: 批量分析多个仓库（使用 subagent 并行执行）
   - gather <options>: 克隆/更新/管理远程 Git 仓库
+  - index: 重建分析索引 (~/.scv/index.md)
 
   当用户需要：
   - 分析代码仓库结构和技术栈
   - 生成项目文档（README、SUMMARY、ARCHITECTURE、FILE_INDEX）
   - 批量分析多个仓库
   - 管理远程仓库克隆
+  - 查看或重建项目分析索引
   时主动使用此 skill。
 
   触发词：分析代码、生成文档、仓库分析、项目文档、批量分析
@@ -30,6 +32,7 @@ description: |
 /scv run <repo_path|url> [project_name]
 /scv batchRun
 /scv gather <options>
+/scv index
 ```
 
 | 子命令 | 功能 | 详细文档 |
@@ -37,6 +40,7 @@ description: |
 | `run` | 单仓库深度分析 | 读取 `references/run.md` |
 | `batchRun` | 批量并行分析 | 读取 `references/batchRun.md` |
 | `gather` | 仓库管理 | 读取 `references/gather.md` |
+| `index` | 重建分析索引 | 读取 `references/index.md` |
 
 ## 执行流程
 
@@ -45,6 +49,7 @@ description: |
    - `run` → `references/run.md`
    - `batchRun` → `references/batchRun.md`
    - `gather` → `references/gather.md`
+   - `index` → `references/index.md`
 3. **执行子命令逻辑**
 
 ## 核心资源
@@ -58,6 +63,7 @@ description: |
 | 配置文件 | `~/.scv/config.json` | 仓库列表和设置 |
 | 仓库存储 | `~/.scv/repos/` | 克隆的远程仓库 |
 | 分析输出 | `~/.scv/analysis/` | 生成的文档 |
+| 分析索引 | `~/.scv/index.md` | 每个项目的一句话摘要 |
 
 ## 输出结构
 

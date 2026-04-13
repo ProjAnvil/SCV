@@ -187,17 +187,26 @@ create_dir "$SCV_DATA_DIR/repos"
 create_dir "$SCV_DATA_DIR/analysis"
 create_dir "$SCV_DATA_DIR/sessions"
 
-# Copy config if not exists
+# Copy config if not exists, then ensure lang is set
 if [ -f "$SCV_DATA_DIR/config.json" ]; then
     echo -e "${GREEN}config.json already exists, skipping${NC}"
 else
     cp "$SCRIPT_DIR/config.example.json" "$SCV_DATA_DIR/config.json"
     echo -e "${GREEN}+${NC} config.json (copied)"
 fi
-else
-    cp "$SCRIPT_DIR/config.example.json" "$SCV_DATA_DIR/config.json"
-    echo -e "${GREEN}+${NC} config.json (copied)"
-fi
+
+# Write/update lang field in config.json using Python (cross-platform, no jq required)
+python3 - <<PYEOF
+import json, pathlib
+cfg_path = pathlib.Path("$SCV_DATA_DIR/config.json")
+try:
+    cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+except Exception:
+    cfg = {}
+cfg["lang"] = "$SKILL_LANG"
+cfg_path.write_text(json.dumps(cfg, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+print("  lang set to: $SKILL_LANG")
+PYEOF
 
 # Step 2: Create Claude directories
 echo -e "\n${BLUE}Step 2: Creating Claude directories${NC}"

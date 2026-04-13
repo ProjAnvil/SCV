@@ -275,6 +275,32 @@ python3 ~/.claude/skills/scv/scripts/scv_util.py write-metadata \
 
 Skip this step if `current_commit` is null (non-Git directory) or if the subagent failed.
 
+### Step 7.5: Update Analysis Index
+
+After successful analysis, update the global index so all analyzed projects can be quickly referenced:
+
+**Step 7.5.1 — Read the README yourself and write the summary + keywords from your own understanding**
+
+Use a file-read tool to open `~/.scv/analysis/{repo_name}/README.md`, then **you** write:
+- **One-line summary**: What does this project do? Max 200 characters.
+- **Functional keywords (功能职责)**: Core business modules or functional areas, up to 5, joined with `、`. Use `-` if you genuinely cannot tell.
+
+Do not run any script to help you extract this text. This is your own judgment after reading.
+
+**Step 7.5.2 — Read the existing index and merge entries**
+
+Read `~/.scv/index.md` (if it exists) and parse existing rows (name / summary / keywords).
+Add or replace the entry for this project; keep all other projects unchanged; sort alphabetically by name.
+If the index file does not exist, the entries list contains only this project.
+
+**Step 7.5.3 — Call the script to write the file**
+
+```bash
+python3 ~/.claude/skills/scv/scripts/scv_util.py update-index \
+  --analysis-dir ~/.scv/analysis \
+  --entries-json '<AI-assembled JSON array>'
+```
+
 ### Step 8: Completion Report
 
 After subagent completes, display:

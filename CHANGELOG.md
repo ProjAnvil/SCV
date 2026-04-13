@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.7.0] - 2026-04-13
+
+### Added
+- **`scv index` subcommand** — new command to rebuild `~/.scv/index.md`, a summary index of all analyzed repositories
+  - New reference docs: `references/index.md` (both `en` and `zh-cn`)
+  - AI reads each project's `README.md` directly and writes one-line summary + functional keywords (up to 5) — no Python text extraction
+  - Generated index includes a directory-structure header and a project table with columns: Project, Summary, Responsibilities
+- **Language-aware index generation**
+  - `scv_util.py update-index` reads `lang` from `~/.scv/config.json` and generates a fully localized `index.md` (all-Chinese for `zh-cn`, all-English for `en`)
+- **`install.sh` persists language setting**
+  - Writes `"lang"` field into `~/.scv/config.json` at install time; updates existing configs on re-install
+- **`config.example.json`** — added `"lang"` field (default: `"en"`)
+
+### Changed
+- **`scv_util.py update-index`** — replaced Python-based README parsing with an AI-driven workflow
+  - New `--entries-json` parameter accepts a JSON array of `{name, summary, keywords}` objects provided by the AI
+  - Removed: `_extract_project_summary`, `_extract_keywords`, `_collect_summaries`, `_write_index`, `rebuild_index`
+- **`run.md` Step 7.5** — updated to AI-driven index update: AI reads the new README, writes summary and keywords itself, merges with existing index, then calls the script to write the file
+- **`batchRun.md` Step 6.5** — updated to delegate to `references/index.md` workflow instead of calling the script directly
+- **`SKILL.md`** (both `en` and `zh-cn`) — added `index` subcommand to description, command list, and routing table
+
 ## [v0.6.1] - 2026-03-27
 
 ### Added

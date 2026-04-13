@@ -265,6 +265,32 @@ python3 ~/.claude/skills/scv/scripts/scv_util.py write-metadata \
 
 如果 `current_commit` 为 null（非 Git 目录）或 subagent 失败，则跳过此步骤。
 
+### Step 7.5: 更新分析索引
+
+分析成功后，将本项目更新到全局索引文件：
+
+**Step 7.5.1 — 你自己读取 README，用自己的理解写出摘要和功能职责**
+
+使用文件读取工具打开 `~/.scv/analysis/{repo_name}/README.md`，然后**由你自己**写出：
+- **一句话摘要**：这个项目是做什么的？最长 200 字
+- **功能职责关键词**：涉及哪些核心业务模块或功能领域？最多 5 个关键词，用 `、` 连接，无法判断就填 `-`
+
+不要执行任何脚本来帮你提取文字，这是你阅读后的自己判断。
+
+**Step 7.5.2 — 读取现有索引，合并 entries**
+
+读取 `~/.scv/index.md`（若存在），解析表格中现有各项目的 name / summary / keywords。
+将本项目加入（或替换同名条目），保持其他项目不变，按名称字母序排列。
+若索引文件不存在，则 entries 仅包含本项目。
+
+**Step 7.5.3 — 调用脚本写入**
+
+```bash
+python3 ~/.claude/skills/scv/scripts/scv_util.py update-index \
+  --analysis-dir ~/.scv/analysis \
+  --entries-json '<AI 组装的 JSON 数组>'
+```
+
 ### Step 8: 完成报告
 
 subagent 完成后显示：
