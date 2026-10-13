@@ -191,12 +191,22 @@ def _record_build_error(e) -> None:
     sys.stderr.write(f"adapter build error: {e}\n")
 
 
+def _log_tail(text: str, limit: int = 2000) -> str:
+    """Collapse whitespace and keep the tail so one event stays one log line."""
+    return " ".join((text or "").split())[-limit:]
+
+
+def _exc_tail(e) -> str:
+    detail = getattr(e, "stderr", None) or str(e)
+    return _log_tail(detail)
+
+
 def _usable_dist(dist_dir: Path, adapter_id: str) -> Path | None:
     """A dist counts as usable when its launcher binary is present."""
     return dist_dir if _os_bin(dist_dir, adapter_id + "-probe").exists() else None
 
 
-def ensure_dist(adapter: dict) -> Path | None:
+def ensure_dist(adapter: dict, analysis_dir: Path) -> Path | None:
     adapter_dir = PERCEPTION_ROOT / "adapters" / adapter["id"]
     dist_dir = DIST_ROOT / adapter["id"]
     hash_file = dist_dir / ".source-hash"
@@ -212,7 +222,10 @@ def ensure_dist(adapter: dict) -> Path | None:
     except (subprocess.SubprocessError, OSError) as e:
         # Ruling (pre-flight scan): a failed rebuild must not discard a
         # previously built, still-usable dist — reuse it and log; only give
-        # up when no usable dist exists.
+        # up when no usable dist exists. Log the cause BEFORE the
+        # reuse-or-None decision (fix round 1: footnotes point at
+        # perception.log, so the log must carry the reason).
+        log_line(analysis_dir, f"tier4 adapter build failed: {_exc_tail(e)}")
         _record_build_error(e)
         reused = _usable_dist(dist_dir, adapter["id"]) if dist_dir.exists() else None
         if reused:
@@ -221,7 +234,9 @@ def ensure_dist(adapter: dict) -> Path | None:
         return None
     install_dir = adapter_dir / "build" / "install" / (adapter["id"] + "-probe")
     if not _os_bin(install_dir, adapter["id"] + "-probe").exists():
-        _record_build_error(RuntimeError(f"installDist produced no launcher in {install_dir}"))
+        err = RuntimeError(f"installDist produced no launcher in {install_dir}")
+        log_line(analysis_dir, f"tier4 adapter build failed: {err}")
+        _record_build_error(err)
         reused = _usable_dist(dist_dir, adapter["id"]) if dist_dir.exists() else None
         return reused
     # installDist writes under the adapter's build/ tree; stage the launcher
@@ -233,29 +248,48 @@ def ensure_dist(adapter: dict) -> Path | None:
     return dist_dir
 
 
-def run_adapter(adapter: dict, dist_dir: Path, mode: str, repo: Path, out_json: Path) -> bool:
+def run_adapter(adapter: dict, dist_dir: Path, mode: str, repo: Path, out_json: Path,
+                analysis_dir: Path) -> bool:
     bin_path = _os_bin(dist_dir, adapter["id"] + "-probe")
     cmd = [str(bin_path), mode, str(repo), str(out_json)]
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=TIER_TIMEOUT)
-    except (subprocess.SubprocessError, OSError):
+    except (subprocess.SubprocessError, OSError) as e:
+        log_line(analysis_dir, f"tier5 adapter launch failed ({mode}): {e}")
         return False
-    return res.returncode == 0 and out_json.exists()
+    if res.returncode != 0 or not out_json.exists():
+        # Fix round 1: the adapter-failed footnote promises "see perception.log",
+        # so failures must land there, not only in swallowed subprocess buffers.
+        log_line(analysis_dir, f"tier5 adapter {mode} rc={res.returncode} "
+                               f"out={'yes' if out_json.exists() else 'no'} "
+                               f"stderr: {_log_tail(res.stderr)}")
+        return False
+    return True
 
 
-def run_loader(loader_dir: Path, json_path: Path, vg_path: Path):
+def run_loader(loader_dir: Path, json_path: Path, vg_path: Path, analysis_dir: Path):
     binary = DIST_ROOT / "loader" / "perception-loader"
     try:
         if not binary.exists():
             binary.parent.mkdir(parents=True, exist_ok=True)
             subprocess.run(["go", "build", "-o", str(binary), "."], cwd=loader_dir,
                            capture_output=True, text=True, timeout=TIER_TIMEOUT, check=True)
+    except (subprocess.SubprocessError, OSError) as e:
+        log_line(analysis_dir, f"tier6 loader build failed: {_exc_tail(e)}")
+        return None
+    try:
         res = subprocess.run([str(binary), str(json_path), str(vg_path)],
                              capture_output=True, text=True, timeout=TIER_TIMEOUT)
-        if res.returncode != 0:
-            return None
+    except (subprocess.SubprocessError, OSError) as e:
+        log_line(analysis_dir, f"tier6 loader run failed: {e}")
+        return None
+    if res.returncode != 0:
+        log_line(analysis_dir, f"tier6 loader rc={res.returncode} stderr: {_log_tail(res.stderr)}")
+        return None
+    try:
         return json.loads(res.stdout)
-    except (subprocess.SubprocessError, OSError, json.JSONDecodeError):
+    except json.JSONDecodeError as e:
+        log_line(analysis_dir, f"tier6 loader stdout not JSON: {e}")
         return None
 
 
@@ -310,7 +344,7 @@ def main() -> int:
         print(json.dumps(emit, ensure_ascii=False))
         return 0
 
-    dist_dir = ensure_dist(adapter)
+    dist_dir = ensure_dist(adapter, analysis_dir)
     if dist_dir is None:
         emit["reason"] = "adapter-build-failed"
         emit["footnote"] = render_footnote(["adapter-build-failed"], args.lang)
@@ -319,11 +353,11 @@ def main() -> int:
         return 0
 
     structure_json = analysis_dir / "structure.json"
-    ok = run_adapter(adapter, dist_dir, mode, repo, structure_json)
+    ok = run_adapter(adapter, dist_dir, mode, repo, structure_json, analysis_dir)
     degraded = False
     if not ok and mode != "noclasspath":
         log_line(analysis_dir, f"tier5 mode {mode} failed; falling back to noclasspath")
-        ok = run_adapter(adapter, dist_dir, "noclasspath", repo, structure_json)
+        ok = run_adapter(adapter, dist_dir, "noclasspath", repo, structure_json, analysis_dir)
         degraded = ok
     if not ok:
         emit["reason"] = "adapter-failed"
@@ -343,7 +377,7 @@ def main() -> int:
     vg_path = analysis_dir / "structure.vg"
     loader_info = None
     if probe_go():
-        loader_info = run_loader(PERCEPTION_ROOT / "loader", structure_json, vg_path)
+        loader_info = run_loader(PERCEPTION_ROOT / "loader", structure_json, vg_path, analysis_dir)
     else:
         reasons.append("go-missing")
     if loader_info:
@@ -356,12 +390,16 @@ def main() -> int:
                 counts["cycles_tolerated"] += 1
     emit["counts"] = counts
 
-    if shutil.which("vectra-mcp"):
+    # Fix round 1: the MCP hint is only meaningful when the snapshot it points
+    # at actually exists — gate on the vg artifact, not just the binary. When
+    # vg is missing, go-missing / mcp-missing reasons already explain it.
+    has_mcp = shutil.which("vectra-mcp") is not None
+    if has_mcp and emit["artifacts"]["structure_vg"]:
         emit["tiers"]["mcp_hint"] = True
         ts = time.strftime("%Y-%m-%d %H:%M")
         emit["mcp_add"] = (f"claude mcp add scv-structure -- vectra-mcp -snapshot {vg_path} "
                            f"# generated {ts}")
-    else:
+    elif not has_mcp:
         reasons.append("mcp-missing")
 
     emit["reason"] = (reasons[0] if len(reasons) == 1 else reasons) if reasons else None
