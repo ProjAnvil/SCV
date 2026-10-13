@@ -1,0 +1,14 @@
+// Gradle init script: registers a non-invasive classpath-printing task.
+// Usage: gradle -q spoonPrintClasspath --init-script cp-init.gradle --no-configuration-cache
+// The task is only registered on projects that apply the java plugin, so the same
+// init script works for multi-project builds (one SPOONCP:: line per java project).
+allprojects {
+    plugins.withType(JavaPlugin) {
+        tasks.register('spoonPrintClasspath') {
+            def cp = sourceSets.main.compileClasspath
+            doLast {
+                println "SPOONCP::[" + project.path + "]::" + cp.asPath
+            }
+        }
+    }
+}

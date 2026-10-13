@@ -1,0 +1,29 @@
+plugins {
+    id 'application'
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation 'fr.inria.gforge.spoon:spoon-core:11.5.0'
+    implementation 'com.google.code.gson:gson:2.13.1'
+}
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
+}
+
+application {
+    mainClass = 'projanvil.scv.beanprobe.BeanProbe'
+}
+
+tasks.named('run') {
+    // usage: gradle run --args="<maven|gradle|noclasspath> <projectDir> <outJson>"
+    if (project.hasProperty('args')) {
+        args project.property('args').toString().split(' ') as List
+    }
+}
