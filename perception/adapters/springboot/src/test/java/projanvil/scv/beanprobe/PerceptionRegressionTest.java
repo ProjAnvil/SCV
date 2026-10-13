@@ -3,7 +3,6 @@ package projanvil.scv.beanprobe;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
-import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -61,6 +60,10 @@ class PerceptionRegressionTest {
         return ((com.google.gson.JsonArray) rawJson(json, key)).asList();
     }
 
+    private static int count(String json, String key) throws Exception {
+        return ((com.google.gson.JsonPrimitive) rawJson(json, key)).getAsInt();
+    }
+
     private static Object rawJson(String json, String key) throws Exception {
         return com.google.gson.JsonParser.parseString(json).getAsJsonObject().get(key);
     }
@@ -70,6 +73,7 @@ class PerceptionRegressionTest {
         String json = Files.readString(runProbe("gradle-lombok-sample"));
         assertEquals(12, array(json, "nodes").size(), "beans");
         assertEquals(8, array(json, "edges").size(), "edges");
+        assertEquals(0, count(json, "unresolved"), "no unresolved injections");
         String flat = json.replaceAll("\\s+", ""); // gson pretty-print emits "key": value
         assertTrue(flat.contains("\"ambiguous\":true"), "ambiguous pair flagged");
         assertTrue(flat.contains("\"qualifier\":\"emailSender\""), "qualifier edge present");
@@ -84,6 +88,6 @@ class PerceptionRegressionTest {
         assertTrue(flat.contains("\"via\":\"inherited-field\""), "inherited injection edge");
         assertTrue(flat.contains("\"via\":\"beanMethod\""), "@Bean param edges");
         assertTrue(json.contains("bean:circularA") && json.contains("bean:circularB"), "cycle pair present");
-        assertFalse(json.contains("UNRESOLVED"), "no unresolved noise");
+        assertEquals(0, count(json, "unresolved"), "no unresolved injections");
     }
 }

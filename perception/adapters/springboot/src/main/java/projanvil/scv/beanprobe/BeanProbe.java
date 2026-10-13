@@ -246,6 +246,7 @@ public class BeanProbe {
         }
         out.put("nodes", nodes);
         out.put("edges", edgeJson);
+        out.put("unresolved", unresolved.size());
         try (PrintWriter w = new PrintWriter(outJson)) {
             w.println(new GsonBuilder().setPrettyPrinting().create().toJson(out));
         }
