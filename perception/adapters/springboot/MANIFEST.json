@@ -1,0 +1,14 @@
+{
+  "id": "springboot",
+  "framework": "Spring Boot",
+  "detect": {
+    "marker_files": ["pom.xml", "build.gradle", "build.gradle.kts",
+                      "settings.gradle", "settings.gradle.kts"],
+    "markers": ["spring-boot", "org.springframework.boot"],
+    "confirm": ["@SpringBootApplication"]
+  },
+  "requires": { "jdk": "17" },
+  "build": "gradle installDist -q",
+  "run": "{dist_bin} {mode} {project} {out}",
+  "artifact": "structure.json"
+}

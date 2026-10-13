@@ -1,0 +1,6 @@
+.gradle/
+build/
+out/
+src/test/resources/fixtures/**/build/
+src/test/resources/fixtures/**/.gradle/
+!MANIFEST.json
