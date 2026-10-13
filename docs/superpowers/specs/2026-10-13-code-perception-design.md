@@ -231,7 +231,7 @@ contain tool names:
 | `skills/*/references/templates/ARCHITECTURE.template.md` | new 「组件依赖 / Component Dependencies」 section placeholder + rendering guidance (from structure.json when present) |
 | `agents/*/project-analyzer.md` | accepts optional structure.json path input; renders the section incl. cycle grading wording |
 | `config.example.json` | `structure_analysis_enabled: true`, `structure_build_execution: "local-only"` |
-| `install.sh` | **whitelist copy** to `~/.scv/perception/`: perceive.py, loader/, README.md, adapters/*/MANIFEST.json — NOT DEVELOPERS.md, NOT adapter sources, NOT fixtures. Adapter dist is built lazily at first use (§5.3 tier 4) — nothing Java ships in the install. |
+| `install.sh` | **whitelist copy** to `~/.scv/perception/`: perceive.py, README.md, loader/, and per adapter: MANIFEST.json + build.gradle + settings.gradle + src/ (build inputs needed by the lazy dist build at §5.3 tier 4 — sources on disk are "addresses" under §1.1-3, never quoted in copy). NOT shipped: DEVELOPERS.md, adapter-internal README.md, fixtures/, .gitignore. |
 
 ## 9. Acceptance criteria (v1)
 
