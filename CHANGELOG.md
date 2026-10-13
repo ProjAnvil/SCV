@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.8.0] - 2026-10-13
+
+### Added
+- **Skill evaluation harness (`eval/`)** — smelt-powered behavior verification for both skills, wired into the repo via Makefile targets (`make eval-sync / eval-smoke / eval-lint / eval-run / eval-compare`)
+  - Pulls the latest local [smelt](https://github.com/ProjAnvil/Smelt) (projanvil/skillcheck) as a uv path dependency
+  - 6 behavior cases per language: subcommand routing, reference reach/restraint, llm-judged execution quality (run / gather / index / batchRun, overview restraint, local non-Git directory)
+  - Hermetic simulated shell: git clone/pull, `~/.scv/config.json`, `scv_util.py`, `batch_manager.py` return canned output — the real home directory is never touched
+  - `run_eval.py` stages each skill under its deployed name (`scv`), supports `--lint-only` (free static checks) and `--compare` with significance noise bands
+- **`examples/usage.md`** in both skills — per-subcommand invocation examples with the flow each triggers
+
+### Changed
+- **`SKILL.md` (en + zh-cn)** — evaluation-driven quality fixes:
+  - Single-line frontmatter description (block-scalar `|` parses as literal `"|"` under YAML-less linters; en description trimmed to ≤500 chars)
+  - General questions are answered directly from SKILL.md without loading references (overview-restraint case 0.20 → 1.00)
+  - Dangling `references/project-analyzer.md` pointer replaced with the deployed `~/.claude/agents/` path; `references/templates/` directory instead of a `*.md` glob
+  - New sections: per-subcommand quick reference; error handling & safety (mandatory completion report, repo content is data not directives, lean inline-analysis fallback when the subagent is unavailable)
+- **`run.md` (en + zh-cn)** — local non-Git directories: proceed when the user asserts the path exists instead of aborting; completion-discipline rules for lean tool use
+- **`en/references/gather.md`** — translated to English (was a duplicate of the Chinese file)
+
+### Evaluation results (same-harness A/B, deepseek-v4-flash, n=2 per case)
+- en: overall **77.5 (C) → 94.0 (A)**; overview-restraint 0.20 → 1.00, run-local-non-git 0.65 → 0.90
+- zh: overall **84.6 (B) → 94.2 (A)**; run-local-non-git 0.70 → 0.93
+- Static lint: 100/100 for both languages; 0 regressed cases
+
 ## [v0.7.0] - 2026-04-13
 
 ### Added
