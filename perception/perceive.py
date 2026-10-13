@@ -182,8 +182,193 @@ def adapter_source_hash(adapter_dir: Path) -> str:
     return h.hexdigest()
 
 
+def _os_bin(dist_dir: Path, name: str) -> Path:
+    sub = "bin/" + (name + ".bat" if os.name == "nt" else name)
+    return dist_dir / sub
+
+
+def _record_build_error(e) -> None:
+    sys.stderr.write(f"adapter build error: {e}\n")
+
+
+def _usable_dist(dist_dir: Path, adapter_id: str) -> Path | None:
+    """A dist counts as usable when its launcher binary is present."""
+    return dist_dir if _os_bin(dist_dir, adapter_id + "-probe").exists() else None
+
+
+def ensure_dist(adapter: dict) -> Path | None:
+    adapter_dir = PERCEPTION_ROOT / "adapters" / adapter["id"]
+    dist_dir = DIST_ROOT / adapter["id"]
+    hash_file = dist_dir / ".source-hash"
+    current = adapter_source_hash(adapter_dir)
+    if dist_dir.exists():
+        bin_path = _os_bin(dist_dir, adapter["id"] + "-probe")
+        if (bin_path.exists() and hash_file.exists()
+                and hash_file.read_text().strip() == current):
+            return dist_dir
+    try:
+        subprocess.run(adapter["build"], shell=True, cwd=adapter_dir,
+                       capture_output=True, text=True, timeout=TIER_TIMEOUT, check=True)
+    except (subprocess.SubprocessError, OSError) as e:
+        # Ruling (pre-flight scan): a failed rebuild must not discard a
+        # previously built, still-usable dist — reuse it and log; only give
+        # up when no usable dist exists.
+        _record_build_error(e)
+        reused = _usable_dist(dist_dir, adapter["id"]) if dist_dir.exists() else None
+        if reused:
+            sys.stderr.write(f"adapter build error: reusing previous dist at {dist_dir}\n")
+            return dist_dir
+        return None
+    install_dir = adapter_dir / "build" / "install" / (adapter["id"] + "-probe")
+    if not _os_bin(install_dir, adapter["id"] + "-probe").exists():
+        _record_build_error(RuntimeError(f"installDist produced no launcher in {install_dir}"))
+        reused = _usable_dist(dist_dir, adapter["id"]) if dist_dir.exists() else None
+        return reused
+    # installDist writes under the adapter's build/ tree; stage the launcher
+    # tree into DIST_ROOT so the dist is self-contained and hash-keyed.
+    if dist_dir.exists():
+        shutil.rmtree(dist_dir)
+    shutil.copytree(install_dir, dist_dir, dirs_exist_ok=True)
+    hash_file.write_text(current)
+    return dist_dir
+
+
+def run_adapter(adapter: dict, dist_dir: Path, mode: str, repo: Path, out_json: Path) -> bool:
+    bin_path = _os_bin(dist_dir, adapter["id"] + "-probe")
+    cmd = [str(bin_path), mode, str(repo), str(out_json)]
+    try:
+        res = subprocess.run(cmd, capture_output=True, text=True, timeout=TIER_TIMEOUT)
+    except (subprocess.SubprocessError, OSError):
+        return False
+    return res.returncode == 0 and out_json.exists()
+
+
+def run_loader(loader_dir: Path, json_path: Path, vg_path: Path):
+    binary = DIST_ROOT / "loader" / "perception-loader"
+    try:
+        if not binary.exists():
+            binary.parent.mkdir(parents=True, exist_ok=True)
+            subprocess.run(["go", "build", "-o", str(binary), "."], cwd=loader_dir,
+                           capture_output=True, text=True, timeout=TIER_TIMEOUT, check=True)
+        res = subprocess.run([str(binary), str(json_path), str(vg_path)],
+                             capture_output=True, text=True, timeout=TIER_TIMEOUT)
+        if res.returncode != 0:
+            return None
+        return json.loads(res.stdout)
+    except (subprocess.SubprocessError, OSError, json.JSONDecodeError):
+        return None
+
+
 def main() -> int:
-    raise NotImplementedError("orchestration added in Task 5")
+    ap = argparse.ArgumentParser()
+    ap.add_argument("repo_path")
+    ap.add_argument("analysis_dir")
+    ap.add_argument("--source", choices=["local", "remote"], default="local")
+    ap.add_argument("--lang", default="zh")
+    args = ap.parse_args()
+
+    repo, analysis_dir = Path(args.repo_path).resolve(), Path(args.analysis_dir).resolve()
+    analysis_dir.mkdir(parents=True, exist_ok=True)
+    emit = {"status": "skipped", "reason": None,
+            "tiers": {"json": False, "vg": False, "mcp_hint": False},
+            "counts": None, "artifacts": {"structure_json": None, "structure_vg": None},
+            "mcp_add": None, "footnote": ""}
+
+    cfg_path = Path.home() / ".scv/config.json"
+    try:
+        cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        cfg = {}
+    if not cfg.get("structure_analysis_enabled", True):
+        emit["status"], emit["reason"] = "skipped", "disabled"
+        log_line(analysis_dir, "tier0 disabled by config")
+        print(json.dumps(emit, ensure_ascii=False))
+        return 0
+    policy = cfg.get("structure_build_execution", "local-only")
+
+    adapter = load_manifest("springboot")
+    if not detect_framework(repo, adapter):
+        emit["status"], emit["reason"] = "not-framework", None
+        log_line(analysis_dir, "tier1 detect: not-framework")
+        print(json.dumps(emit, ensure_ascii=False))
+        return 0
+
+    cleanup_stale(analysis_dir)
+    # Resolve and log the mode BEFORE any adapter execution (ruling: the tier1
+    # detect line must carry mode= so remote/noclasspath runs are auditable).
+    mode = resolve_mode(repo, args.source, policy)
+    log_line(analysis_dir, f"tier1 detect: springboot, source={args.source}, "
+                           f"policy={policy}, mode={mode}")
+
+    reasons: list[str] = []
+    java = probe_java()
+    if not java or java < int(adapter["requires"]["jdk"]):
+        reasons.append("jdk-missing")
+        log_line(analysis_dir, f"tier3 jdk probe: {java}")
+        emit["reason"] = "jdk-missing"
+        emit["footnote"] = render_footnote(reasons, args.lang)
+        print(json.dumps(emit, ensure_ascii=False))
+        return 0
+
+    dist_dir = ensure_dist(adapter)
+    if dist_dir is None:
+        emit["reason"] = "adapter-build-failed"
+        emit["footnote"] = render_footnote(["adapter-build-failed"], args.lang)
+        log_line(analysis_dir, "tier4 dist build failed")
+        print(json.dumps(emit, ensure_ascii=False))
+        return 0
+
+    structure_json = analysis_dir / "structure.json"
+    ok = run_adapter(adapter, dist_dir, mode, repo, structure_json)
+    degraded = False
+    if not ok and mode != "noclasspath":
+        log_line(analysis_dir, f"tier5 mode {mode} failed; falling back to noclasspath")
+        ok = run_adapter(adapter, dist_dir, "noclasspath", repo, structure_json)
+        degraded = ok
+    if not ok:
+        emit["reason"] = "adapter-failed"
+        emit["footnote"] = render_footnote(["adapter-failed"], args.lang)
+        log_line(analysis_dir, "tier5 adapter failed (incl. noclasspath fallback)")
+        print(json.dumps(emit, ensure_ascii=False))
+        return 0
+
+    emit["status"], emit["tiers"]["json"] = "ok", True
+    emit["artifacts"]["structure_json"] = str(structure_json)
+    graph = json.loads(structure_json.read_text(encoding="utf-8"))
+    counts = {"components": len(graph["nodes"]), "edges": len(graph["edges"]),
+              "cycles_fatal": 0, "cycles_tolerated": 0}
+    if degraded:
+        reasons.append("degraded-noclasspath")
+
+    vg_path = analysis_dir / "structure.vg"
+    loader_info = None
+    if probe_go():
+        loader_info = run_loader(PERCEPTION_ROOT / "loader", structure_json, vg_path)
+    else:
+        reasons.append("go-missing")
+    if loader_info:
+        emit["tiers"]["vg"] = True
+        emit["artifacts"]["structure_vg"] = str(vg_path)
+        for c in loader_info.get("cycles", []):
+            if c.get("grade") == "fatal":
+                counts["cycles_fatal"] += 1
+            else:
+                counts["cycles_tolerated"] += 1
+    emit["counts"] = counts
+
+    if shutil.which("vectra-mcp"):
+        emit["tiers"]["mcp_hint"] = True
+        ts = time.strftime("%Y-%m-%d %H:%M")
+        emit["mcp_add"] = (f"claude mcp add scv-structure -- vectra-mcp -snapshot {vg_path} "
+                           f"# generated {ts}")
+    else:
+        reasons.append("mcp-missing")
+
+    emit["reason"] = (reasons[0] if len(reasons) == 1 else reasons) if reasons else None
+    emit["footnote"] = render_footnote(reasons, args.lang)
+    log_line(analysis_dir, f"tiers done: {emit['tiers']} reasons={reasons}")
+    print(json.dumps(emit, ensure_ascii=False))
+    return 0
 
 
 if __name__ == "__main__":
