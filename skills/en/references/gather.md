@@ -1,62 +1,62 @@
-# scv gather - 仓库管理
+# scv gather - Repository Management
 
-克隆和管理远程 Git 仓库，用于后续分析。
+Clone and manage remote Git repositories for later analysis.
 
-## 用法
+## Usage
 
 ```
-/scv gather <git_url> [branch]           # 克隆单个仓库
-/scv gather --batch [--config <path>]    # 批量克隆配置中的仓库
-/scv gather --update [repo_name]         # 更新指定仓库
-/scv gather --update-all                 # 更新所有仓库
-/scv gather --list                       # 列出所有仓库
-/scv gather --remove <repo_name>         # 删除仓库
+/scv gather <git_url> [branch]           # Clone a single repository
+/scv gather --batch [--config <path>]    # Batch-clone repositories from the config
+/scv gather --update [repo_name]         # Update a specific repository
+/scv gather --update-all                 # Update all repositories
+/scv gather --list                       # List all repositories
+/scv gather --remove <repo_name>         # Remove a repository
 ```
 
-## 执行步骤
+## Execution Steps
 
-### Step 1: 初始化仓库目录
+### Step 1: Initialize the repository directory
 
 ```bash
 mkdir -p ~/.scv/repos
 ```
 
-显示存储位置：
+Display storage locations:
 ```
-📁 仓库存储: ~/.scv/repos
-🔧 配置文件: ~/.scv/config.json
+📁 Repository storage: ~/.scv/repos
+🔧 Config file: ~/.scv/config.json
 ```
 
-### Step 2: 解析参数并确定模式
+### Step 2: Parse arguments and determine the mode
 
-| 模式 | 参数 | 说明 |
-|------|------|------|
-| 单仓库克隆 | `<git_url> [branch]` | 克隆单个 Git 仓库 |
-| 批量克隆 | `--batch` | 从配置文件克隆所有远程仓库 |
-| 更新仓库 | `--update [repo_name]` | 更新指定仓库 |
-| 更新全部 | `--update-all` | 更新所有仓库 |
-| 列出仓库 | `--list` | 显示所有已克隆仓库 |
-| 删除仓库 | `--remove <repo_name>` | 删除指定仓库 |
+| Mode | Arguments | Description |
+|------|-----------|-------------|
+| Single clone | `<git_url> [branch]` | Clone a single Git repository |
+| Batch clone | `--batch` | Clone all remote repositories from the config file |
+| Update repo | `--update [repo_name]` | Update a specific repository |
+| Update all | `--update-all` | Update all repositories |
+| List repos | `--list` | Show all cloned repositories |
+| Remove repo | `--remove <repo_name>` | Delete a specific repository |
 
-无参数时显示用法：
+With no arguments, show usage:
 ```
-用法: /scv gather <git_url> [branch]
+Usage: /scv gather <git_url> [branch]
       /scv gather --batch [--config <path>]
       /scv gather --update [repo_name] | --update-all
       /scv gather --list
       /scv gather --remove <repo_name>
 
-命令:
-  克隆单个仓库:     /scv gather <git_url> [branch]
-  批量克隆:         /scv gather --batch [--config <path>]
-  更新仓库:         /scv gather --update [repo_name]
-  更新所有仓库:     /scv gather --update-all
-  列出仓库:         /scv gather --list
-  删除仓库:         /scv gather --remove <repo_name>
+Commands:
+  Clone a single repo:    /scv gather <git_url> [branch]
+  Batch clone:            /scv gather --batch [--config <path>]
+  Update a repo:          /scv gather --update [repo_name]
+  Update all repos:       /scv gather --update-all
+  List repos:             /scv gather --list
+  Remove a repo:          /scv gather --remove <repo_name>
 
-配置文件: ~/.scv/config.json
+Config file: ~/.scv/config.json
 
-示例:
+Examples:
   /scv gather https://github.com/user/project.git
   /scv gather https://github.com/user/project.git main
   /scv gather --batch
@@ -64,184 +64,184 @@ mkdir -p ~/.scv/repos
   /scv gather --list
 ```
 
-### Step 3: 单仓库克隆模式
+### Step 3: Single repository clone mode
 
-1. **验证 Git URL**:
-   - 检查是否为有效的 Git URL
-   - 提取 `repo_name`: `basename(url)` 去掉 `.git`
+1. **Validate the Git URL**:
+   - Check that it is a valid Git URL
+   - Extract `repo_name`: `basename(url)` without the `.git` suffix
 
-2. **检查是否已存在**:
-   - 目标路径: `~/.scv/repos/{repo_name}`
-   - 已存在时询问用户：
+2. **Check whether it already exists**:
+   - Target path: `~/.scv/repos/{repo_name}`
+   - If it exists, ask the user:
      ```
-     仓库 '{repo_name}' 已存在于 ~/.scv/repos/{repo_name}
-     选项:
-       1. 拉取最新更改 (git pull)
-       2. 删除并重新克隆
-       3. 跳过，使用现有
-     选择 [1/2/3]:
+     Repository '{repo_name}' already exists at ~/.scv/repos/{repo_name}
+     Options:
+       1. Pull latest changes (git pull)
+       2. Delete and re-clone
+       3. Skip, use the existing copy
+     Choice [1/2/3]:
      ```
 
-3. **克隆仓库**:
+3. **Clone the repository**:
    ```bash
    cd ~/.scv/repos
    git clone {git_url} {repo_name}
    ```
-   指定分支时：
+   With an explicit branch:
    ```bash
    git clone -b {branch} {git_url} {repo_name}
    ```
 
-4. **验证并显示结果**:
+4. **Verify and show the result**:
    ```
-   ✅ 仓库克隆成功
-   📁 路径: ~/.scv/repos/{repo_name}
+   ✅ Repository cloned successfully
+   📁 Path: ~/.scv/repos/{repo_name}
    🔗 URL: {git_url}
-   🌿 分支: {current_branch}
-   📦 最新提交: {commit_hash} - {commit_message}
+   🌿 Branch: {current_branch}
+   📦 Latest commit: {commit_hash} - {commit_message}
 
-   💡 提示: 要将此仓库添加到批量分析配置，请编辑 ~/.scv/config.json
+   💡 Tip: to add this repository to the batch analysis config, edit ~/.scv/config.json
    ```
 
-### Step 4: 批量克隆模式
+### Step 4: Batch clone mode
 
-1. **确定配置文件**:
-   - 默认: `~/.scv/config.json`
-   - `--config <path>`: 使用指定路径
+1. **Determine the config file**:
+   - Default: `~/.scv/config.json`
+   - `--config <path>`: use the given path
 
-2. **加载配置并过滤**:
-   - 只处理 `type: "remote"` 的仓库
-   - 跳过 `type: "local"` 的仓库
+2. **Load the config and filter**:
+   - Only process repositories with `type: "remote"`
+   - Skip repositories with `type: "local"`
 
-3. **显示批量计划**:
+3. **Show the batch plan**:
    ```
-   📋 批量克隆计划
-   配置: ~/.scv/config.json
-   输出目录: ~/.scv/analysis
-   远程仓库: {N}
-   本地仓库 (跳过): {N}
+   📋 Batch Clone Plan
+   Config: ~/.scv/config.json
+   Output directory: ~/.scv/analysis
+   Remote repositories: {N}
+   Local repositories (skipped): {N}
 
-   待克隆远程仓库:
+   Remote repositories to clone:
      1. [Remote Project 1] https://github.com/user/repo1.git (branch: main)
         → ~/.scv/repos/repo1
      2. [Remote Project 2] https://github.com/user/repo2.git (branch: develop)
         → ~/.scv/repos/repo2
 
-   跳过 (本地):
-     3. [Local Project 3] ~/local/repo3 (type: local, 不由 gather 克隆)
+   Skipped (local):
+     3. [Local Project 3] ~/local/repo3 (type: local, not cloned by gather)
    ```
 
-4. **执行克隆**:
-   - 检查每个仓库是否存在
-   - 存在：执行 `git pull`
-   - 不存在：执行 `git clone`
+4. **Execute the clones**:
+   - For each repository, check whether it exists
+   - Exists: run `git pull`
+   - Not exists: run `git clone`
 
-5. **追踪进度**:
+5. **Track progress**:
    ```
-   ✅ [1/2] Remote Project 1 克隆完成
+   ✅ [1/2] Remote Project 1 cloned
    📁 ~/.scv/repos/repo1
-   🌿 分支: main
+   🌿 Branch: main
 
-   ⚠️ [2/2] Remote Project 2 已存在，已更新
+   ⚠️ [2/2] Remote Project 2 already exists, updated
    📁 ~/.scv/repos/repo2
-   🌿 分支: develop
+   🌿 Branch: develop
    ```
 
-6. **生成摘要**:
+6. **Generate the summary**:
    ```
    ╔════════════════════════════════════════════════════════════╗
-   ║         批量克隆完成                                        ║
+   ║         Batch Clone Complete                                 ║
    ╚════════════════════════════════════════════════════════════╝
 
-   配置: ~/.scv/config.json
-   结果:
-     ✅ 新克隆: {N}/{total}
-     ✅ 已更新: {N}/{total}
-     ⚠️ 跳过: {N}/{total}
-     ❌ 失败: {N}/{total}
+   Config: ~/.scv/config.json
+   Results:
+     ✅ Newly cloned: {N}/{total}
+     ✅ Updated: {N}/{total}
+     ⚠️ Skipped: {N}/{total}
+     ❌ Failed: {N}/{total}
 
-   已处理远程仓库:
+   Remote repositories processed:
      1. Remote Project 1 → ~/.scv/repos/repo1
      2. Remote Project 2 → ~/.scv/repos/repo2
 
-   失败仓库:
+   Failed repositories:
      1. Remote Project 3 → {error}
 
-   下一步:
-     - 运行 /scv batchRun 分析所有仓库（远程 + 本地）
+   Next steps:
+     - Run /scv batchRun to analyze all repositories (remote + local)
    ```
 
-### Step 5: 更新仓库模式
+### Step 5: Update repository mode
 
-**更新单个仓库** (`--update [repo_name]`):
+**Update a single repository** (`--update [repo_name]`):
 
-1. 未指定名称时，列出可用仓库让用户选择
-2. 验证仓库存在于 `~/.scv/repos/{repo_name}`
-3. 执行更新：
+1. Without a name, list available repositories and let the user choose
+2. Verify the repository exists at `~/.scv/repos/{repo_name}`
+3. Run the update:
    ```bash
    cd ~/.scv/repos/{repo_name}
    git fetch origin
    git pull origin {current_branch}
    ```
-4. 显示结果：
+4. Show the result:
    ```
-   ✅ 仓库更新成功
+   ✅ Repository updated successfully
    📁 ~/.scv/repos/{repo_name}
-   🌿 分支: {branch}
-   📦 最新提交: {commit_hash} - {commit_message}
+   🌿 Branch: {branch}
+   📦 Latest commit: {commit_hash} - {commit_message}
    ```
 
-**更新所有仓库** (`--update-all`):
+**Update all repositories** (`--update-all`):
 
-1. 列出 `~/.scv/repos/` 中所有目录
-2. 对每个 Git 仓库执行 `git pull`
-3. 显示汇总结果
+1. List all directories under `~/.scv/repos/`
+2. Run `git pull` for every Git repository
+3. Show a summary of the results
 
-### Step 6: 列出仓库模式
+### Step 6: List repositories mode
 
-1. 扫描 `~/.scv/repos/` 目录
-2. 对每个子目录：
-   - 检查是否为 Git 仓库
-   - 提取：名称、远程 URL、当前分支、最后提交日期
+1. Scan the `~/.scv/repos/` directory
+2. For each subdirectory:
+   - Check whether it is a Git repository
+   - Extract: name, remote URL, current branch, last commit date
 
-3. 显示表格：
+3. Display the table:
    ```
-   📁 本地仓库 (存储于 ~/.scv/repos/)
+   📁 Local repositories (stored in ~/.scv/repos/)
 
-   | 名称          | 分支    | 最后提交           | URL                          |
+   | Name          | Branch  | Last commit        | URL                          |
    |---------------|---------|--------------------|------------------------------|
    | my-app        | main    | 2025-01-15 10:30   | github.com/user/my-app.git   |
    | api-service   | develop | 2025-01-14 14:22   | github.com/user/api.git      |
    | cli-tools     | master  | 2025-01-10 09:15   | github.com/user/cli.git      |
 
-   总计: 3 个仓库
+   Total: 3 repositories
    ```
 
-### Step 7: 删除仓库模式
+### Step 7: Remove repository mode
 
-1. 验证 `repo_name` 已提供
-2. 确认删除：
+1. Verify that `repo_name` was provided
+2. Confirm the deletion:
    ```
-   ⚠️  即将删除仓库: {repo_name}
-   📁 位置: ~/.scv/repos/{repo_name}
+   ⚠️  About to delete repository: {repo_name}
+   📁 Location: ~/.scv/repos/{repo_name}
 
-   这将删除整个目录及其所有内容。
-   这不会从 ~/.scv/config.json 中移除条目。
+   This deletes the entire directory and all of its contents.
+   This does NOT remove the entry from ~/.scv/config.json.
 
-   确定吗？输入 'yes' 确认:
+   Are you sure? Type 'yes' to confirm:
    ```
-3. 确认后执行：
+3. After confirmation, execute:
    ```bash
    rm -rf ~/.scv/repos/{repo_name}
    ```
-4. 报告成功：
+4. Report success:
    ```
-   ✅ 仓库已删除
+   ✅ Repository deleted
    📁 ~/.scv/repos/{repo_name}
-   💡 提示: 要从配置中移除，请编辑 ~/.scv/config.json
+   💡 Tip: to also remove it from the config, edit ~/.scv/config.json
    ```
 
-## 配置文件 Schema
+## Config File Schema
 
 ### ~/.scv/config.json
 
@@ -252,13 +252,13 @@ mkdir -p ~/.scv/repos
     {
       "type": "remote",
       "url": "https://github.com/user/repo.git",
-      "project_name": "自定义名称",
+      "project_name": "Custom Name",
       "branch": "main"
     },
     {
       "type": "local",
       "path": "~/local/path/to/repo",
-      "project_name": "本地项目"
+      "project_name": "Local Project"
     }
   ],
   "parallel": false,
@@ -266,37 +266,37 @@ mkdir -p ~/.scv/repos
 }
 ```
 
-### 目录名称提取
+### Directory name extraction
 
-**远程仓库**:
-- URL: `https://github.com/user/my-project.git` → 目录: `my-project`
-- URL: `git@github.com:user/awesome-app.git` → 目录: `awesome-app`
+**Remote repositories**:
+- URL: `https://github.com/user/my-project.git` → directory: `my-project`
+- URL: `git@github.com:user/awesome-app.git` → directory: `awesome-app`
 
-**本地仓库**:
-- 路径: `~/projects/my-app` → 目录: `my-app`
+**Local repositories**:
+- Path: `~/projects/my-app` → directory: `my-app`
 
-## 错误处理
+## Error Handling
 
-| 错误 | 处理方式 |
-|------|----------|
-| 认证失败 | 引导配置 Git 凭证 |
-| 无效 URL | 报告错误，建议正确格式 |
-| 仓库已存在 | 询问用户操作 |
-| 权限不足 | 检查目录权限 |
-| 网络错误 | 检查网络连接和仓库可访问性 |
+| Error | Handling |
+|-------|----------|
+| Authentication failed | Guide the user to configure Git credentials |
+| Invalid URL | Report the error, suggest the correct format |
+| Repository already exists | Ask the user what to do |
+| Insufficient permissions | Check directory permissions |
+| Network error | Check the network connection and repository accessibility |
 
-## 与其他命令集成
+## Integration with Other Commands
 
 ```bash
-# 1. 克隆仓库
+# 1. Clone a repository
 /scv gather https://github.com/user/awesome-project.git
 
-# 2. 立即分析
+# 2. Analyze it right away
 /scv run ~/.scv/repos/awesome-project
 ```
 
 ```bash
-# 1. 创建配置
+# 1. Create the config
 cat > ~/.scv/config.json <<EOF
 {
   "output_dir": "~/.scv/analysis",
@@ -308,28 +308,28 @@ cat > ~/.scv/config.json <<EOF
 }
 EOF
 
-# 2. 批量克隆远程仓库
+# 2. Batch-clone the remote repositories
 /scv gather --batch
 
-# 3. 验证
+# 3. Verify
 /scv gather --list
 
-# 4. 批量分析（远程 + 本地）
+# 4. Batch-analyze (remote + local)
 /scv batchRun
 ```
 
-## 最佳实践
+## Best Practices
 
-1. **使用有意义的项目名称** 便于识别
-2. **指定分支** 当需要特定版本时
-3. **定期更新** 使用 `--update-all`
-4. **清理** 使用 `--remove` 删除不再需要的仓库
-5. **检查状态** 使用 `--list` 查看所有仓库
+1. **Use meaningful project names** for easier identification
+2. **Specify a branch** when you need a specific version
+3. **Update regularly** with `--update-all`
+4. **Clean up** with `--remove` for repositories you no longer need
+5. **Check status** with `--list` to see all repositories
 
-## 注意事项
+## Notes
 
-- `scv gather` **只处理** 配置中 `type: "remote"` 的仓库
-- `scv batchRun` 处理**远程和本地**两种类型
-- 目录名称**自动从 URL 或路径提取**
-- `project_name` 用于文档和报告中的显示
-- 所有分析输出存储在**同一个** `output_dir` 中
+- `scv gather` processes **only** repositories with `type: "remote"` in the config
+- `scv batchRun` processes **both remote and local** types
+- Directory names are **extracted automatically** from the URL or path
+- `project_name` is used for display in documents and reports
+- All analysis output is stored in the **same** `output_dir`
