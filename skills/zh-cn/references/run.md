@@ -181,10 +181,10 @@ cat ~/.scv/config.json 2>/dev/null | grep -q '"deep_analysis_enabled"[[:space:]]
 
 执行：
 ```bash
-python3 ~/.scv/perception/perceive.py {analysis_path} ~/.scv/analysis/{repo_name} --source {local|remote}
+python3 ~/.scv/perception/perceive.py {analysis_path} ~/.scv/analysis/{repo_name} --source {local|remote} --lang zh-cn
 ```
 
-解读 stdout 单行 JSON：`not-framework` → 直接进入 Step 6；`skipped` → 将 `footnote` 原样放入 Step 8 报告；`ok` → 用 `counts` 渲染摘要行、把 `artifacts.structure_json` 传入 Step 6 子代理、`mcp_add` 非空时渲染为可复制命令块。`counts` 为 null 时省略循环依赖子句。
+解读 stdout 单行 JSON：`not-framework` → 直接进入 Step 6；`skipped` → 将 `footnote` 原样放入 Step 8 报告；`ok` → 用 `counts` 渲染摘要行、把 `artifacts.structure_json` 传入 Step 6 子代理、`mcp_add` 非空时渲染为可复制命令块。`cycles_fatal` 为 null（查询文件层级被跳过，循环计数缺失）时，省略摘要行中的循环依赖子句。
 
 摘要行：
 ```

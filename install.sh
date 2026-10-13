@@ -252,6 +252,9 @@ if [ -d "$PERCEPTION_SRC" ]; then
     mkdir -p "$PERCEPTION_TARGET/adapters" "$PERCEPTION_TARGET/dist"
     cp "$PERCEPTION_SRC/perceive.py" "$PERCEPTION_TARGET/perceive.py"
     cp "$PERCEPTION_SRC/README.md" "$PERCEPTION_TARGET/README.md"
+    # rm -rf before cp -r: a plain cp -r into an existing target dir would nest
+    # (loader/loader/...) on re-install and break the adapter source hash.
+    rm -rf "$PERCEPTION_TARGET/loader"
     cp -r "$PERCEPTION_SRC/loader" "$PERCEPTION_TARGET/loader"
     for adapter_dir in "$PERCEPTION_SRC"/adapters/*/; do
         [ -d "$adapter_dir" ] || continue
@@ -259,6 +262,7 @@ if [ -d "$PERCEPTION_SRC" ]; then
         mkdir -p "$PERCEPTION_TARGET/adapters/$aid"
         cp "$adapter_dir/MANIFEST.json" "$PERCEPTION_TARGET/adapters/$aid/" 2>/dev/null || true
         cp "$adapter_dir/build.gradle" "$adapter_dir/settings.gradle" "$PERCEPTION_TARGET/adapters/$aid/" 2>/dev/null || true
+        rm -rf "$PERCEPTION_TARGET/adapters/$aid/src"
         cp -r "$adapter_dir/src" "$PERCEPTION_TARGET/adapters/$aid/src"
         rm -rf "$PERCEPTION_TARGET/adapters/$aid/src/test"
     done

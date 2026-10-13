@@ -13,9 +13,9 @@ spring-petclinic and the bundled fixtures — see "Verification" below). Interfa
 Requires JDK 17+ and Gradle (or a target project's own `gradlew`).
 
 ```bash
-cd beanprobe
+cd perception/adapters/springboot
 gradle installDist                # build once
-./build/install/beanprobe/bin/beanprobe gradle /path/to/spring-project /tmp/beans.json
+./build/install/springboot-probe/bin/springboot-probe gradle /path/to/spring-project /tmp/beans.json
 ```
 
 Or directly:
@@ -39,10 +39,10 @@ Output: `nodes[{key,label,props}]` / `edges[{srcKey,dstKey,label:"INJECTS",props
 
 ```bash
 # 1. extract
-beanprobe gradle /path/to/spring-project beans.json
+springboot-probe gradle /path/to/spring-project beans.json
 # 2. load into vectra (small Go loader importing github.com/projanvil/vectra:
 #    AddNode/AddEdge per JSON entry, IndexProperty("stereotype"...), Seal, SaveFile)
-vectra-load beans.json beans.vg
+perception-loader beans.json beans.vg
 # 3. serve to any MCP host (Claude Code: claude mcp add vectra -- vectra-mcp -snapshot beans.vg)
 vectra-mcp -snapshot beans.vg
 ```
@@ -76,8 +76,8 @@ dependency-cycle reports (`cycles`) directly over the bean graph.
 
 ## Fixtures (regression suite)
 
-`fixtures/` holds two self-contained Spring Boot 3.4 projects with hand-computed
-ground truth:
+`src/test/resources/fixtures/` holds two self-contained Spring Boot 3.4 projects
+with hand-computed ground truth:
 
 - `gradle-lombok-sample` — single module, Lombok `@RequiredArgsConstructor`,
   `@Qualifier`, ambiguity marking, `@ConditionalOnProperty`/`@Profile`, `@Bean` params.
@@ -87,10 +87,13 @@ ground truth:
   default-override pattern, `@EnableConfigurationProperties`, a deliberate circular
   dependency (caught by vectra `cycles()`), and an out-of-scan false-positive probe.
 
-Expected results when run from this repo: **sample = 12 beans / 8 edges,
-torture-app = 30 beans / 24 edges, 0 unresolved** (verify after any analyzer change).
+Expected results, asserted by the regression suite (`gradle test`, fixtures are
+copied to a temp dir so nested builds never touch the source tree):
+**sample = 12 beans / 8 edges, torture-app = 30 beans / 24 edges, 0 unresolved**
+(verify after any analyzer change).
 
 ```bash
-gradle run --args="gradle ../fixtures/gradle-lombok-sample /tmp/sample.json"
-gradle run --args="gradle ../fixtures/torture-app /tmp/torture.json"
+gradle test
+gradle run --args="gradle src/test/resources/fixtures/gradle-lombok-sample /tmp/sample.json"
+gradle run --args="gradle src/test/resources/fixtures/torture-app /tmp/torture.json"
 ```

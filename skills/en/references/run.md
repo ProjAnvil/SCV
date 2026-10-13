@@ -175,7 +175,7 @@ cat ~/.scv/config.json 2>/dev/null | grep -q '"deep_analysis_enabled"[[:space:]]
 
 ### Step 5.5: Deep Structural Analysis (Code Perception)
 
-**Read configuration** (`~/.scv/config.json`): if `structure_analysis_enabled` is `false` or absent-false, skip this step silently.
+**Read configuration** (`~/.scv/config.json`): if `structure_analysis_enabled` is `false`, skip this step silently (an absent key defaults to enabled).
 
 Determine `--source`: `remote` if the repository was cloned from a remote URL (Step 2/3), else `local`.
 
@@ -186,7 +186,7 @@ If this is the first run on this machine, tell the user:
 
 Run:
 ```bash
-python3 ~/.scv/perception/perceive.py {analysis_path} ~/.scv/analysis/{repo_name} --source {local|remote}
+python3 ~/.scv/perception/perceive.py {analysis_path} ~/.scv/analysis/{repo_name} --source {local|remote} --lang en
 ```
 
 **Interpret the single-line JSON on stdout:**
@@ -196,7 +196,7 @@ python3 ~/.scv/perception/perceive.py {analysis_path} ~/.scv/analysis/{repo_name
 | `status: not-framework` | nothing — proceed to Step 6 |
 | `status: skipped` | render `footnote` verbatim in the Step 8 completion report (perception section) |
 | `status: ok` | render the summary line below from `counts`; store `artifacts.structure_json` for the Step 6 prompt; if `mcp_add` is non-null, render it as a copyable command block |
-| `counts` null | omit the cycle clause |
+| `cycles_fatal` null | cycle counts are null when the query-file (loader) tier was skipped — omit the cycle clause from the summary line |
 
 Summary line (render from counts):
 ```

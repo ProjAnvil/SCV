@@ -70,6 +70,28 @@ def _iter_marker_files(repo: Path, names: list[str], max_depth: int = 3):
                 yield Path(dirpath) / f
 
 
+_SOURCE_ROOT_SUFFIXES = (("src", "main", "java"), ("src", "main", "kotlin"))
+
+
+def _iter_source_roots(repo: Path, max_depth: int = 3):
+    """Yield every src/main/{java,kotlin} dir across the repo (root + submodules).
+
+    The depth bound mirrors the marker scan: a module counts when its directory
+    sits within max_depth of the repo root (marker files are found the same
+    way); its source root is that dir plus src/main/{java,kotlin}, so the walk
+    prunes at max_depth + 3. Contents are NOT walked here — callers scan each
+    root separately, so descent stops once a root is yielded.
+    """
+    for dirpath, dirnames, _filenames in os.walk(repo):
+        parts = Path(dirpath).relative_to(repo).parts
+        if len(parts) >= max_depth + 3:
+            dirnames[:] = []
+        if parts[-3:] in _SOURCE_ROOT_SUFFIXES:
+            root = Path(dirpath)
+            dirnames[:] = []
+            yield root
+
+
 def detect_framework(repo: Path, manifest: dict) -> bool:
     det = manifest["detect"]
     candidate = False
@@ -83,11 +105,16 @@ def detect_framework(repo: Path, manifest: dict) -> bool:
             break
     if not candidate:
         return False
-    # second stage: confirm framework ownership in sources
-    for src_root in ("src/main/java", "src/main/kotlin"):
-        root = repo / src_root
-        if not root.is_dir():
+    # second stage: confirm framework ownership in sources — the root module
+    # AND submodule source roots (multi-module layouts keep the boot class in
+    # a submodule); roots dedupe by directory.
+    scanned: set[Path] = set()
+    source_roots: list[Path] = [repo / s for s in ("src/main/java", "src/main/kotlin")]
+    source_roots.extend(_iter_source_roots(repo))
+    for root in source_roots:
+        if not root.is_dir() or root in scanned:
             continue
+        scanned.add(root)
         for dirpath, _dirnames, filenames in os.walk(root):
             for f in filenames:
                 if not f.endswith((".java", ".kt")):
@@ -366,11 +393,20 @@ def main() -> int:
         print(json.dumps(emit, ensure_ascii=False))
         return 0
 
+    try:
+        graph = json.loads(structure_json.read_text(encoding="utf-8"))
+        counts = {"components": len(graph["nodes"]), "edges": len(graph["edges"]),
+                  "cycles_fatal": 0, "cycles_tolerated": 0}
+    except Exception as e:
+        # Exit-0 contract: unreadable/malformed adapter output degrades to the
+        # same adapter-failed skip as a crashed adapter — never a traceback.
+        emit["reason"] = "adapter-failed"
+        emit["footnote"] = render_footnote(["adapter-failed"], args.lang)
+        log_line(analysis_dir, f"tier5 adapter output not a usable graph: {e}")
+        print(json.dumps(emit, ensure_ascii=False))
+        return 0
     emit["status"], emit["tiers"]["json"] = "ok", True
     emit["artifacts"]["structure_json"] = str(structure_json)
-    graph = json.loads(structure_json.read_text(encoding="utf-8"))
-    counts = {"components": len(graph["nodes"]), "edges": len(graph["edges"]),
-              "cycles_fatal": 0, "cycles_tolerated": 0}
     if degraded:
         reasons.append("degraded-noclasspath")
 
@@ -388,6 +424,12 @@ def main() -> int:
                 counts["cycles_fatal"] += 1
             else:
                 counts["cycles_tolerated"] += 1
+    else:
+        # Spec §5.1: the adapter never computes SCCs, so when the Go/loader
+        # tier did not run the cycle counts are null (not a false zero) and
+        # the summary line omits the cycle clause.
+        counts["cycles_fatal"] = None
+        counts["cycles_tolerated"] = None
     emit["counts"] = counts
 
     # Fix round 1: the MCP hint is only meaningful when the snapshot it points

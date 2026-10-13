@@ -29,6 +29,15 @@ class DetectTests(unittest.TestCase):
             (src / "App.java").write_text("@SpringBootApplication class App")
             self.assertTrue(perceive.detect_framework(d, self.manifest))
 
+    def test_multi_module_submodule_confirm(self):
+        with TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "build.gradle").write_text("plugins { id 'org.springframework.boot' version '3.4.5' }")
+            src = d / "service/src/main/java/com/x"
+            src.mkdir(parents=True)
+            (src / "App.java").write_text("@SpringBootApplication public class App {}")
+            self.assertTrue(perceive.detect_framework(d, self.manifest))
+
     def test_marker_without_confirm_is_rejected(self):
         with TemporaryDirectory() as d:
             d = Path(d)
