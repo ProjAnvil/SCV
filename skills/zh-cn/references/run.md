@@ -191,6 +191,10 @@ python3 ~/.scv/perception/perceive.py {analysis_path} ~/.scv/analysis/{repo_name
 🧭 深度结构分析：检测到 Spring Boot 项目 — {components} 个组件、{edges} 条依赖边、循环依赖 {cycles_fatal + cycles_tolerated} 处（{cycles_fatal} 处启动级 / {cycles_tolerated} 处容忍级）。
 ```
 
+若 `footnote` 非空（存在降级层级），将其单行追加在摘要行之后。
+
+本步骤绝不可导致整次运行失败；perceive.py 始终以退出码 0 结束，其输出的 JSON 是措辞的唯一事实来源。
+
 ### Step 6: 启动 project-analyzer Subagent
 
 **启动专用分析 subagent：**
