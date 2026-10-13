@@ -3,6 +3,8 @@
   "output_dir": "~/.scv/analysis",
   "batch_size": 5,
   "deep_analysis_enabled": false,
+  "structure_analysis_enabled": true,
+  "structure_build_execution": "local-only",
   "repos": [
     {
       "type": "remote",

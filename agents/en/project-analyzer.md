@@ -341,6 +341,7 @@ Project Name: {name used in document headers}
 Current Commit: {current HEAD commit hash, if Git repository}
 Deep Analysis: {true|false}
 Skeleton File: {path to skeleton file, if deep analysis enabled}
+Structure Data: {structure.json path or 'N/A'}
 ```
 
 **Start your analysis:**
@@ -376,6 +377,7 @@ Skeleton File: {path to skeleton file, if deep analysis enabled}
    - Follow template structure strictly
    - Replace all placeholders with actual analysis content
    - If Deep Analysis was enabled, inject more detailed Service relationship info into existing sections
+   - If Structure Data is provided, render the Component Dependencies section in ARCHITECTURE.md strictly from that JSON (counts, cycle grading wording: 启动级/startup-fatal vs 容忍级/tolerated); never fabricate dependency edges
    - If Current Commit is provided, display it in README.md and SUMMARY.md as "Analyzed at commit: {short_hash}"
    - Mark uncertain content with `[To be confirmed]`
    - Note: metadata (commit hash → `.scv_metadata.json`) is written by `batch_manager.py complete` after this agent finishes — do NOT write metadata yourself

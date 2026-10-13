@@ -1,6 +1,6 @@
 ---
 name: scv
-description: SCV (Source Code Vault) - deep code repository analysis. Subcommands - run <path|url> analyzes a repo and generates the 4 analysis docs; batchRun batch-analyzes configured repos in parallel; gather clones/updates/lists/removes Git repos; index rebuilds ~/.scv/index.md. Use this skill when users need codebase analysis, project documentation, batch analysis, or repo management. Triggers - analyze code, generate docs, repository analysis, project documentation, batch analysis.
+description: SCV (Source Code Vault) - deep code repository analysis. Subcommands - run <path|url> analyzes a repo and generates the 4 analysis docs; batchRun batch-analyzes configured repos in parallel; gather clones/updates/lists/removes Git repos; index rebuilds ~/.scv/index.md. Use this skill when users need codebase analysis, project documentation, batch analysis, or repo management. Triggers - analyze code, generate docs, repository analysis, project documentation, batch analysis; detects supported frameworks (Spring Boot) and maps component dependencies for structure-aware docs and agent queries.
 ---
 
 # SCV - Source Code Vault
@@ -43,6 +43,7 @@ General questions — what SCV is, which subcommands exist, where output is stor
 ## Quick Reference
 
 - `run <path|url>` — prepare `~/.scv` dirs → clone remote/local-git repos into `~/.scv/repos/` (non-Git dirs are analyzed in place) → read commit info via `scv_util.py` → launch the `project-analyzer` subagent → write metadata → update the index → completion report.
+- `run (perception)` — deep structural analysis runs automatically inside `run` for supported frameworks; no user action required.
 - `batchRun` — plan via `batch_manager.py` → analyze every configured repo (remote + local) through the same analyzer flow → update the index → summary report.
 - `gather` — clone/update/list/remove repos under `~/.scv/repos/`; only `type: remote` entries come from `config.json`; destructive actions (`--remove`) require explicit user confirmation.
 - `index` — list `~/.scv/analysis/` → read each project's README yourself (never script-parse it) → write entries with `scv_util.py update-index`.

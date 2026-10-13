@@ -216,6 +216,17 @@ sequenceDiagram
 
 ---
 
+## Component Dependencies
+
+<!-- Render ONLY when Structure Data input is not 'N/A'. Source of truth: the structure JSON file — do not invent edges. -->
+Summarize the component dependency data: total components, dependency edges, circular
+dependencies with grading (startup-fatal vs tolerated), the most-depended-on components
+(top 3 by incoming edges), and the dependency path between the two most central
+components. For ≤30 components render a Mermaid `graph TD`; otherwise list top hubs only.
+Mark anything uncertain as [To be confirmed].
+
+---
+
 ## 6. External Integration
 
 ### 6.1 Integration List

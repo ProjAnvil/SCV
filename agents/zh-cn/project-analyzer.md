@@ -342,6 +342,7 @@ codebones search ""
 当前提交: {当前 HEAD commit hash，如果是 Git 仓库}
 深度分析: {true|false}
 骨架文件: {骨架文件路径，如果深度分析已启用}
+结构数据 (Structure Data): {structure.json 路径或 'N/A'}
 ```
 
 **开始分析:**
@@ -377,6 +378,7 @@ codebones search ""
    - 严格遵循模板结构
    - 将所有占位符替换为实际分析内容
    - 如果深度分析已启用，在现有章节中注入更详细的 Service 关联信息
+   - 如果提供了结构数据（Structure Data），严格按该 JSON 渲染 ARCHITECTURE.md 的「组件依赖」章节（数量统计、循环依赖分级措辞：启动级/startup-fatal 与容忍级/tolerated）；绝不臆造依赖边
    - 如果提供了当前提交信息，在 README.md 和 SUMMARY.md 中以"分析时提交: {short_hash}"格式显示
    - 不确定的内容标注 `[待确认]`
    - 注意：元数据（commit hash → `.scv_metadata.json`）由 `batch_manager.py complete` 在本 agent 完成后写入 — 不要自行写入 metadata

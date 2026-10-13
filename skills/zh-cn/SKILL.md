@@ -1,6 +1,6 @@
 ---
 name: scv
-description: SCV (Source Code Vault) - 代码仓库深度分析工具。子命令 - run <path|url> 分析单个仓库并生成 README/SUMMARY/ARCHITECTURE/FILE_INDEX 四份文档；batchRun 并行批量分析配置中的所有仓库；gather 克隆/更新/列出/删除远程 Git 仓库；index 重建 ~/.scv/index.md 分析索引。当用户需要代码仓库分析、生成项目文档、批量分析、仓库管理或查看分析索引时，主动使用本 skill。触发词 - 分析代码、生成文档、仓库分析、项目文档、批量分析。
+description: SCV (Source Code Vault) - 代码仓库深度分析工具。子命令 - run <path|url> 分析单个仓库并生成 README/SUMMARY/ARCHITECTURE/FILE_INDEX 四份文档；batchRun 并行批量分析配置中的所有仓库；gather 克隆/更新/列出/删除远程 Git 仓库；index 重建 ~/.scv/index.md 分析索引。当用户需要代码仓库分析、生成项目文档、批量分析、仓库管理或查看分析索引时，主动使用本 skill。触发词 - 分析代码、生成文档、仓库分析、项目文档、批量分析；识别已支持的框架（Spring Boot）并提取组件依赖，用于结构感知的文档生成与 agent 查询。
 ---
 
 # SCV - Source Code Vault
@@ -43,6 +43,7 @@ description: SCV (Source Code Vault) - 代码仓库深度分析工具。子命�
 ## 快速参考
 
 - `run <path|url>` — 准备 `~/.scv` 目录 → 远程/本地 git 仓库克隆到 `~/.scv/repos/`（非 git 目录原地分析）→ 通过 `scv_util.py` 获取 commit 信息 → 启动 `project-analyzer` subagent → 写元数据 → 更新索引 → 完成报告。
+- `run（代码感知）` — 对已支持的框架，深度结构分析在 `run` 内自动执行，无需用户操作。
 - `batchRun` — 通过 `batch_manager.py` 生成计划 → 用同一分析流程处理配置中的所有仓库（远程+本地）→ 更新索引 → 汇总报告。
 - `gather` — 克隆/更新/列出/删除 `~/.scv/repos/` 下的仓库；配置中只处理 `type: remote` 条目；破坏性操作（`--remove`）必须经用户明确确认。
 - `index` — 列出 `~/.scv/analysis/` → 亲自阅读每个项目的 README（禁止用脚本解析）→ 通过 `scv_util.py update-index` 写入条目。

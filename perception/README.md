@@ -6,7 +6,7 @@ architecture documentation — and that agents can query in later sessions.
 
 **Supported: Spring Boot.** For a Spring Boot project, `/scv run` performs
 deep structural analysis automatically: it maps components (services, controllers,
-repositories, configuration beans) and their dependency edges, detects circular
+repositories, configuration components) and their dependency edges, detects circular
 dependencies, and enriches ARCHITECTURE.md with a "Component Dependencies" section.
 
 ## Optional query tier

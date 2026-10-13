@@ -168,6 +168,29 @@ cat ~/.scv/config.json 2>/dev/null | grep -q '"deep_analysis_enabled"[[:space:]]
    - `skeleton_file = ~/.scv/analysis/{repo_name}/.codebones_skeleton.md`
    - `repo_path = {analysis_path}`（用于 codebones get/search 操作）
 
+### Step 5.5: 深度结构分析（代码感知）
+
+读取 `~/.scv/config.json`：`structure_analysis_enabled` 为 `false` 时静默跳过本步。
+
+仓库来自远程克隆（Step 2/3 的 remote 分支）则 `--source remote`，否则 `local`。
+
+首次运行提示：
+```
+🔍 正在进行深度结构分析，首次运行可能需要数分钟（含组件构建与依赖下载）。
+```
+
+执行：
+```bash
+python3 ~/.scv/perception/perceive.py {analysis_path} ~/.scv/analysis/{repo_name} --source {local|remote}
+```
+
+解读 stdout 单行 JSON：`not-framework` → 直接进入 Step 6；`skipped` → 将 `footnote` 原样放入 Step 8 报告；`ok` → 用 `counts` 渲染摘要行、把 `artifacts.structure_json` 传入 Step 6 子代理、`mcp_add` 非空时渲染为可复制命令块。`counts` 为 null 时省略循环依赖子句。
+
+摘要行：
+```
+🧭 深度结构分析：检测到 Spring Boot 项目 — {components} 个组件、{edges} 条依赖边、循环依赖 {cycles_fatal + cycles_tolerated} 处（{cycles_fatal} 处启动级 / {cycles_tolerated} 处容忍级）。
+```
+
 ### Step 6: 启动 project-analyzer Subagent
 
 **启动专用分析 subagent：**
@@ -187,6 +210,7 @@ Agent(
   - 模板目录: {skill_path}/references/templates/
   - 深度分析: {use_deep_analysis}
   - 骨架文件: {skeleton_file_path if use_deep_analysis else 'N/A'}
+  - 结构数据 (Structure Data): {artifacts.structure_json；感知成功时传入，否则 'N/A'}
   - AI 模型: 使用系统上下文中的实际模型名称（如 claude-sonnet-4-6）
 
   执行 3 阶段分析工作流：
@@ -306,6 +330,9 @@ subagent 完成后显示：
 
 分析模式:
   🔍 深度分析: {use_deep_analysis ? '已启用 (codebones 骨架)' : '标准分析'}
+
+结构分析:
+  🧭 深度结构分析: {Step 5.5 的摘要行或 footnote；框架不支持时为 '不适用（框架不支持）'}
 
 输出目录:
   📂 ~/.scv/analysis/{repo_name}/

@@ -243,6 +243,30 @@ else
     echo -e "${YELLOW}No scripts directory found, skipping${NC}"
 fi
 
+# Step 4.5: Install code perception runtime (whitelist — no fixtures, no developer docs)
+echo -e "\n${BLUE}Step 4.5: Installing code perception runtime${NC}"
+PERCEPTION_SRC="$SCRIPT_DIR/perception"
+PERCEPTION_TARGET="$SCV_DATA_DIR/perception"
+if [ -d "$PERCEPTION_SRC" ]; then
+    create_dir "$PERCEPTION_TARGET"
+    mkdir -p "$PERCEPTION_TARGET/adapters" "$PERCEPTION_TARGET/dist"
+    cp "$PERCEPTION_SRC/perceive.py" "$PERCEPTION_TARGET/perceive.py"
+    cp "$PERCEPTION_SRC/README.md" "$PERCEPTION_TARGET/README.md"
+    cp -r "$PERCEPTION_SRC/loader" "$PERCEPTION_TARGET/loader"
+    for adapter_dir in "$PERCEPTION_SRC"/adapters/*/; do
+        [ -d "$adapter_dir" ] || continue
+        aid=$(basename "$adapter_dir")
+        mkdir -p "$PERCEPTION_TARGET/adapters/$aid"
+        cp "$adapter_dir/MANIFEST.json" "$PERCEPTION_TARGET/adapters/$aid/" 2>/dev/null || true
+        cp "$adapter_dir/build.gradle" "$adapter_dir/settings.gradle" "$PERCEPTION_TARGET/adapters/$aid/" 2>/dev/null || true
+        cp -r "$adapter_dir/src" "$PERCEPTION_TARGET/adapters/$aid/src"
+        rm -rf "$PERCEPTION_TARGET/adapters/$aid/src/test"
+    done
+    echo -e "${GREEN}+${NC} perception runtime -> $PERCEPTION_TARGET"
+else
+    echo -e "${YELLOW}No perception directory found, skipping${NC}"
+fi
+
 # Step 5: Install project-analyzer agent
 echo -e "\n${BLUE}Step 5: Installing project-analyzer agent ($SKILL_LANG)${NC}"
 create_symlink "$SCV_AGENT_SRC" "$CLAUDE_AGENTS_DIR/project-analyzer.md" "project-analyzer.md"

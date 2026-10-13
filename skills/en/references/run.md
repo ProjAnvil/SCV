@@ -173,6 +173,39 @@ cat ~/.scv/config.json 2>/dev/null | grep -q '"deep_analysis_enabled"[[:space:]]
 - Set `use_deep_analysis = false`
 - Continue with standard analysis
 
+### Step 5.5: Deep Structural Analysis (Code Perception)
+
+**Read configuration** (`~/.scv/config.json`): if `structure_analysis_enabled` is `false` or absent-false, skip this step silently.
+
+Determine `--source`: `remote` if the repository was cloned from a remote URL (Step 2/3), else `local`.
+
+If this is the first run on this machine, tell the user:
+```
+🔍 Deep structural analysis in progress; the first run may take a few minutes (component build + dependency download).
+```
+
+Run:
+```bash
+python3 ~/.scv/perception/perceive.py {analysis_path} ~/.scv/analysis/{repo_name} --source {local|remote}
+```
+
+**Interpret the single-line JSON on stdout:**
+
+| Field | Action |
+|---|---|
+| `status: not-framework` | nothing — proceed to Step 6 |
+| `status: skipped` | render `footnote` verbatim in the Step 8 completion report (perception section) |
+| `status: ok` | render the summary line below from `counts`; store `artifacts.structure_json` for the Step 6 prompt; if `mcp_add` is non-null, render it as a copyable command block |
+| `counts` null | omit the cycle clause |
+
+Summary line (render from counts):
+```
+🧭 Deep structural analysis: Spring Boot project — {components} components, {edges} dependency edges, {cycles_fatal + cycles_tolerated} circular dependencies ({cycles_fatal} startup-fatal / {cycles_tolerated} tolerated).
+```
+If `footnote` is non-empty (degraded tiers), append it after the summary line, single line.
+
+**Never** fail the run because of this step; perceive.py always exits 0 and its JSON is the single source of truth for wording.
+
 ### Step 6: Launch project-analyzer Subagent
 
 **Launch the specialized subagent:**
@@ -192,6 +225,7 @@ Agent(
   - Templates Directory: {skill_path}/references/templates/
   - Deep Analysis: {use_deep_analysis}
   - Skeleton File: {skeleton_file_path if use_deep_analysis else 'N/A'}
+  - Structure Data: {artifacts.structure_json if perception ok else 'N/A'}
   - AI Model: Use your actual model name from the system context (e.g., claude-sonnet-4-6)
 
   Execute the 3-phase analysis workflow:
@@ -316,6 +350,9 @@ Repository information:
 
 Analysis mode:
   🔍 Deep Analysis: {use_deep_analysis ? 'Enabled (codebones skeleton)' : 'Standard'}
+
+Structural analysis:
+  🧭 Deep structural analysis: {summary line or footnote from Step 5.5, or 'Not applicable (framework not supported)'}
 
 Output directory:
   📂 ~/.scv/analysis/{repo_name}/
