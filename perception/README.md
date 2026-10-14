@@ -11,11 +11,31 @@ dependencies, and enriches ARCHITECTURE.md with a "Component Dependencies" secti
 
 ## Optional query tier
 
-When a Go 1.27+ runtime and the `vectra-mcp` tool are available, `/scv run` also
-generates a structure-graph query file (`structure.vg`) and prints the command to
-register it as an MCP service (`scv-structure`), enabling dependency queries
-(multi-hop reachability, impact radius, cycles) in future sessions. Install the
-tool with: `go install github.com/projanvil/vectra/mcp/cmd/vectra-mcp@latest`
+When a Go 1.27+ runtime is available, `/scv run` also generates a structure-graph
+query file (`structure.vg`) **and builds `scv-graph-mcp`** — a query service over
+every analyzed repository. One registration serves all repos; agents query by
+repo name plus a graph query language (Cypher subset) and get full node
+information back:
+
+```
+claude mcp add scv-graph -- ~/.scv/perception/dist/graphmcp/scv-graph-mcp
+```
+
+MCP tools: `repos` (list analyzed repositories), `cypher(repo, query)`,
+`get_node(repo, key)`, `refresh`. Node properties include the component kind
+(`stereotype`: RestController / Service / Repository / Configuration / ...),
+bean name, type, source file:line, and conditions; edges carry `INJECTS` with
+via/qualifier annotations. Example queries:
+
+```
+MATCH (n {stereotype:'RestController'}) RETURN n                      -- all controllers with full info
+MATCH (s {stereotype:'Service'})-[:INJECTS]->(m) RETURN s.key, m.key  -- service dependency pairs
+MATCH (a {key:'bean:orderController'})-[:INJECTS*1..2]->(b) RETURN DISTINCT b.key   -- transitive impact
+```
+
+Fallback: without a Go runtime, a separately installed
+`vectra-mcp` (`go install github.com/projanvil/vectra/mcp/cmd/vectra-mcp@latest`)
+can serve one repository's snapshot per registration (`scv-structure`).
 
 Both tiers are optional enhancements: when their runtime is missing, `/scv run`
 notes the skip in its completion report and finishes normally.

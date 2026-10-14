@@ -320,6 +320,24 @@ def run_loader(loader_dir: Path, json_path: Path, vg_path: Path, analysis_dir: P
         return None
 
 
+def build_graphmcp(analysis_dir: Path) -> Path | None:
+    """Build (once) the multi-repo graph-query MCP server. Best-effort: a
+    failure here never affects the JSON/vg tiers — it only drops the query
+    hint back to the per-snapshot vectra-mcp path."""
+    binary = DIST_ROOT / "graphmcp" / "scv-graph-mcp"
+    if binary.exists():
+        return binary
+    try:
+        binary.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(["go", "build", "-o", str(binary), "."],
+                       cwd=PERCEPTION_ROOT / "graphmcp",
+                       capture_output=True, text=True, timeout=TIER_TIMEOUT, check=True)
+        return binary
+    except (subprocess.SubprocessError, OSError) as e:
+        log_line(analysis_dir, f"tier8 graphmcp build failed: {_exc_tail(e)}")
+        return None
+
+
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("repo_path")
@@ -435,10 +453,18 @@ def main() -> int:
     # Fix round 1: the MCP hint is only meaningful when the snapshot it points
     # at actually exists — gate on the vg artifact, not just the binary. When
     # vg is missing, go-missing / mcp-missing reasons already explain it.
+    # Graph-query tier (vectra v0.6 Cypher): our own multi-repo server is the
+    # preferred registration — one scv-graph registration serves EVERY
+    # analyzed repository, so the hint does not depend on this run's vg.
+    graph_bin = build_graphmcp(analysis_dir) if probe_go() else None
     has_mcp = shutil.which("vectra-mcp") is not None
-    if has_mcp and emit["artifacts"]["structure_vg"]:
+    ts = time.strftime("%Y-%m-%d %H:%M")
+    if graph_bin:
         emit["tiers"]["mcp_hint"] = True
-        ts = time.strftime("%Y-%m-%d %H:%M")
+        emit["mcp_add"] = (f"claude mcp add scv-graph -- {graph_bin} "
+                           f"# one registration serves every analyzed repo ({ts})")
+    elif has_mcp and emit["artifacts"]["structure_vg"]:
+        emit["tiers"]["mcp_hint"] = True
         emit["mcp_add"] = (f"claude mcp add scv-structure -- vectra-mcp -snapshot {vg_path} "
                            f"# generated {ts}")
     elif not has_mcp:

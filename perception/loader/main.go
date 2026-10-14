@@ -82,29 +82,22 @@ func loadAndGrade(jsonPath string) resultOut {
 	return grade(gr, nodeCount)
 }
 
-// grade is a read-only report on a sealed graph: cycle discovery and edge
-// via inspection via EdgesOf never mutate it.
+// grade is a read-only report on a sealed graph. Since vectra v0.5 the Cycle
+// value carries the intra-cycle edges with full props, so via-inspection no
+// longer re-joins EdgesOf records.
 func grade(gr *vectra.Graph, nodeCount int) resultOut {
 	out := resultOut{Nodes: nodeCount, Edges: gr.EdgeCount(), Cycles: []cycleOut{}}
 	for _, c := range gr.Cycles() {
-		keys := make(map[string]bool, len(c.Nodes))
 		members := make([]string, 0, len(c.Nodes))
 		for _, id := range c.Nodes {
 			if n, ok := gr.NodeByID(id); ok {
 				members = append(members, n.Key)
-				keys[n.Key] = true
 			}
 		}
 		grade := "tolerated"
-		for k := range keys {
-			edges, err := gr.EdgesOf(k, vectra.DirOut, "INJECTS")
-			must(err)
-			for _, e := range edges {
-				if dst, ok := gr.NodeByID(e.Dst); ok && keys[dst.Key] {
-					if via, ok := e.Props["via"].(string); ok && fatalVia[via] {
-						grade = "fatal"
-					}
-				}
+		for _, e := range c.Edges {
+			if via, ok := e.Props["via"].(string); ok && fatalVia[via] {
+				grade = "fatal"
 			}
 		}
 		out.Cycles = append(out.Cycles, cycleOut{Nodes: members, Grade: grade})

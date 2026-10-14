@@ -256,6 +256,8 @@ if [ -d "$PERCEPTION_SRC" ]; then
     # (loader/loader/...) on re-install and break the adapter source hash.
     rm -rf "$PERCEPTION_TARGET/loader"
     cp -r "$PERCEPTION_SRC/loader" "$PERCEPTION_TARGET/loader"
+    rm -rf "$PERCEPTION_TARGET/graphmcp"
+    cp -r "$PERCEPTION_SRC/graphmcp" "$PERCEPTION_TARGET/graphmcp"
     for adapter_dir in "$PERCEPTION_SRC"/adapters/*/; do
         [ -d "$adapter_dir" ] || continue
         aid=$(basename "$adapter_dir")
