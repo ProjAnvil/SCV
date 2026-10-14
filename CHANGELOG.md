@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.10.0] - 2026-10-14
+
+### Added
+- **Graph query access: repo + Cypher** — `scv-graph-mcp`, a multi-repo query server over every `~/.scv/analysis/*/structure.vg`: one MCP registration (`scv-graph`) serves ALL analyzed repositories with `repos` / `cypher(repo, query)` / `get_node(repo, key)` / `refresh` tools; agents query by repo name plus a Cypher-subset pattern language and get full node info (stereotype, beanName, type, source, conditions)
+  - Built automatically by the perception Go tier; the completion-report hint prefers the multi-repo registration, falling back to per-snapshot `vectra-mcp` (`scv-structure`)
+  - perception/README documents the query surface with examples (stereotype census, dependency pairs, `*1..2` transitive impact)
+- **Vectra v0.6.0 upgrade** — cycle grading now reads `Cycle.Edges` directly (intra-cycle edges with props); v3 snapshots persist property-index declarations, so stereotype-anchored queries work from snapshots (previously `lookup_property` was unavailable in `-snapshot` mode)
+
+### Changed
+- `install.sh` perception whitelist ships the `graphmcp/` module
+
+### Test matrix — Spring Boot 2 + 3, full-chain query assertions
+- Three new fixtures with hand-computed ground truth:
+  - `boot2-legacy` (Boot 2.7): javax lifecycle, field injection, `@Autowired` multi-ctor selection, abstract-base inherited injection, competing `@Profile` beans, `@Value`-mixed ctor — 15 beans / 10 edges / 4 ambiguous
+  - `boot3-modern` (Boot 3.5, Java 21): sealed interface + record beans, record constructor binding of a record `@ConfigurationProperties`, `@Primary` collapse, jakarta lifecycle, switch expressions — 12 beans / 6 edges / 0 ambiguous
+  - `boot2-multi` (Boot 2.7, 3 modules): boot entry point in the web submodule, cross-module DI — 6 beans / 4 edges
+- `PerceptionRegressionTest` grows to 5 fixture cases (gradle-lombok-sample, torture-app, boot2-legacy, boot3-modern, boot2-multi)
+- `test_perceive_query_matrix`: per fixture the FULL chain (perceive → structure.vg → scv-graph-mcp) is asserted — per-stereotype Cypher census against ground truth, cross-module dependency pairs, ambiguity counts; one server instance serves all five repos
+- `graphmcp`: cross-repo isolation test (no node leakage between repositories)
+
 ## [v0.9.0] - 2026-10-14
 
 ### Added
