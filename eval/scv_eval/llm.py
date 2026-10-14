@@ -41,3 +41,8 @@ def agent_llm() -> OpenAIChatClient:
 def judge_llm() -> OpenAIChatClient:
     """The LLM grading outputs and reviewing SKILL.md writing."""
     return _role_llm("JUDGE")
+
+
+def challenger_llm() -> OpenAIChatClient:
+    """The LLM adversarially probing description/routing (challenge tier)."""
+    return _role_llm("CHALLENGER")

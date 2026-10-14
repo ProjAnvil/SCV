@@ -1,0 +1,13 @@
+{
+  "nodes": [
+    {"key": "bean:orderController", "label": "Bean", "props": {"beanName": "orderController", "type": "com.mini.OrderController", "stereotype": "RestController", "primary": false, "source": "OrderController.java:8"}},
+    {"key": "bean:orderService", "label": "Bean", "props": {"beanName": "orderService", "type": "com.mini.OrderService", "stereotype": "Service", "primary": false, "source": "OrderService.java:6"}},
+    {"key": "bean:orderRepository", "label": "Bean", "props": {"beanName": "orderRepository", "type": "com.mini.OrderRepository", "stereotype": "Repository", "primary": false, "source": "OrderRepository.java:9"}}
+  ],
+  "edges": [
+    {"srcKey": "bean:orderController", "dstKey": "bean:orderService", "label": "INJECTS", "props": {"via": "constructor", "at": "OrderController.java:12"}},
+    {"srcKey": "bean:orderService", "dstKey": "bean:orderRepository", "label": "INJECTS", "props": {"via": "constructor", "at": "OrderService.java:10"}},
+    {"srcKey": "bean:orderRepository", "dstKey": "bean:orderService", "label": "INJECTS", "props": {"via": "setter", "at": "OrderRepository.java:15"}}
+  ],
+  "unresolved": 0
+}

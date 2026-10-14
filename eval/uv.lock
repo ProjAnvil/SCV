@@ -863,7 +863,7 @@ requires-dist = [
 
 [[package]]
 name = "smelt"
-version = "0.5.1"
+version = "0.6.0"
 source = { directory = "../../skillcheck" }
 dependencies = [
     { name = "markdown-it-py" },
@@ -892,6 +892,7 @@ requires-dist = [
     { name = "markdown-it-py", specifier = ">=4.2.0" },
     { name = "openai", marker = "extra == 'openai'", specifier = ">=1.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0" },
+    { name = "pyyaml", marker = "extra == 'dev'", specifier = ">=6" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.6" },
 ]
 provides-extras = ["dev", "openai", "json", "langchain", "langchain-openai", "langchain-anthropic"]
