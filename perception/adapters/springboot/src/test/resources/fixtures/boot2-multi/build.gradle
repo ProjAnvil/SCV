@@ -1,0 +1,14 @@
+// aggregator root: marker only; the boot app lives in the web submodule
+plugins {
+    id 'java'
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation platform('org.springframework.boot:spring-boot-dependencies:2.7.18')
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation project(':service')
+}

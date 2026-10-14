@@ -90,4 +90,55 @@ class PerceptionRegressionTest {
         assertTrue(json.contains("bean:circularA") && json.contains("bean:circularB"), "cycle pair present");
         assertEquals(0, count(json, "unresolved"), "no unresolved injections");
     }
+
+    @Test
+    void boot2LegacyGroundTruth() throws Exception {
+        // Spring Boot 2.7: javax lifecycle, field injection, @Autowired multi-ctor,
+        // 1-level inheritance, competing @Profile beans, @Value mixed ctor.
+        String json = Files.readString(runProbe("boot2-legacy"));
+        assertEquals(15, array(json, "nodes").size(), "beans");
+        assertEquals(10, array(json, "edges").size(), "edges");
+        assertEquals(0, count(json, "unresolved"), "no unresolved injections");
+        String flat = json.replaceAll("\\s+", "");
+        assertTrue(flat.contains("\"via\":\"inherited-field\""), "injected field from abstract controller");
+        assertTrue(flat.contains("bean:notifierService\""), "multi-ctor: only @Autowired ctor counted");
+        long ambiguous = flat.split("\"ambiguous\":true", -1).length - 1;
+        assertEquals(4, ambiguous, "two ambiguous pairs (channel + greeting profiles)");
+        assertTrue(flat.contains("bean:mockGreetingService") && flat.contains("bean:realGreetingService"),
+                "competing profile beans present");
+    }
+
+    @Test
+    void boot3ModernGroundTruth() throws Exception {
+        // Spring Boot 3.5 / Java 21: sealed interface + record beans, record
+        // constructor binding of a record @ConfigurationProperties, @Primary
+        // collapse, jakarta lifecycle, switch expressions in bodies.
+        String json = Files.readString(runProbe("boot3-modern"));
+        assertEquals(12, array(json, "nodes").size(), "beans");
+        assertEquals(6, array(json, "edges").size(), "edges");
+        assertEquals(0, count(json, "unresolved"), "no unresolved injections");
+        String flat = json.replaceAll("\\s+", "");
+        assertTrue(flat.contains("bean:paymentProps"), "record @ConfigurationProperties registered");
+        assertTrue(flat.contains("\"stereotype\":\"ConfigurationProperties\""),
+                "properties record carries the ConfigurationProperties stereotype");
+        assertTrue(flat.contains("bean:cardChannel") && flat.contains("bean:paymentProps"),
+                "record constructor binding edge cardChannel -> paymentProps");
+        long amb = flat.split("\"ambiguous\":true", -1).length - 1;
+        assertEquals(0, amb, "@Primary collapses the sealed-interface pair");
+        assertTrue(flat.contains("bean:asyncConfig"), "@Import'ed @Configuration detected");
+    }
+
+    @Test
+    void boot2MultiGroundTruth() throws Exception {
+        // Spring Boot 2.7 multi-module with the boot entry point in the web
+        // submodule: multi-module detection + cross-module DI edges.
+        String json = Files.readString(runProbe("boot2-multi"));
+        assertEquals(6, array(json, "nodes").size(), "beans");
+        assertEquals(4, array(json, "edges").size(), "edges");
+        assertEquals(0, count(json, "unresolved"), "no unresolved injections");
+        String flat = json.replaceAll("\\s+", "");
+        assertTrue(flat.contains("bean:boot2MultiApplication"), "submodule @SpringBootApplication detected");
+        assertTrue(flat.contains("bean:customerController") && flat.contains("bean:customerRepository"),
+                "web -> domain cross-module components present");
+    }
 }

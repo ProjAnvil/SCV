@@ -28,12 +28,26 @@ func buildVG(t *testing.T, path string) {
 	}
 }
 
+// buildBetaVG writes a DIFFERENT graph so cross-repo isolation is assertable.
+func buildBetaVG(t *testing.T, path string) {
+	t.Helper()
+	g := vectra.New()
+	g.IndexProperty("stereotype")
+	g.AddNode("bean:nightScheduler", "Bean", map[string]any{"stereotype": "Scheduler", "beanName": "nightScheduler"})
+	if err := g.Seal(); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.SaveFile(path); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestStoreListAndCypher(t *testing.T) {
 	dir := t.TempDir()
-	for _, repo := range []string{"alpha", "beta"} {
-		os.MkdirAll(filepath.Join(dir, repo), 0o755)
-		buildVG(t, filepath.Join(dir, repo, "structure.vg"))
-	}
+	os.MkdirAll(filepath.Join(dir, "alpha"), 0o755)
+	os.MkdirAll(filepath.Join(dir, "beta"), 0o755)
+	buildVG(t, filepath.Join(dir, "alpha", "structure.vg"))
+	buildBetaVG(t, filepath.Join(dir, "beta", "structure.vg"))
 	// a repo without a graph must be ignored
 	os.MkdirAll(filepath.Join(dir, "empty"), 0o755)
 
@@ -49,7 +63,10 @@ func TestStoreListAndCypher(t *testing.T) {
 		t.Fatalf("repos: %+v", repos)
 	}
 	if repos[0].Nodes != 3 || repos[0].Edges != 1 {
-		t.Fatalf("stats: %+v", repos[0])
+		t.Fatalf("alpha stats: %+v", repos[0])
+	}
+	if repos[1].Nodes != 1 || repos[1].Edges != 0 {
+		t.Fatalf("beta stats: %+v", repos[1])
 	}
 
 	g, err := s.graph("alpha")
@@ -66,6 +83,30 @@ func TestStoreListAndCypher(t *testing.T) {
 	node := res.Rows[0]["n"].(vectra.Node)
 	if node.Key != "bean:orderController" {
 		t.Fatalf("node: %+v", node)
+	}
+
+	// cross-repo isolation: beta's Scheduler does not leak into alpha
+	alpha, err := s.graph("alpha")
+	if err != nil {
+		t.Fatal(err)
+	}
+	beta, err := s.graph("beta")
+	if err != nil {
+		t.Fatal(err)
+	}
+	alphaSched, err := alpha.Cypher(`MATCH (n {stereotype:'Scheduler'}) RETURN n`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(alphaSched.Rows) != 0 {
+		t.Fatalf("beta node leaked into alpha: %+v", alphaSched.Rows)
+	}
+	betaSched, err := beta.Cypher(`MATCH (n {stereotype:'Scheduler'}) RETURN n`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(betaSched.Rows) != 1 {
+		t.Fatalf("beta Scheduler missing: %+v", betaSched.Rows)
 	}
 }
 
