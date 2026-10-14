@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.9.0] - 2026-10-14
+
+### Added
+- **Code Perception capability (`perception/`)** — `/scv run` now auto-detects supported frameworks and runs deep structural analysis; users never see the implementation language
+  - **Spring Boot adapter** (`perception/adapters/springboot/`): Spoon-based static extractor mapping components (services, controllers, repositories, configuration beans) and their dependency edges — multi-module Gradle & Maven, Lombok `@RequiredArgsConstructor`, constructor/field/setter/`@Bean`-method injection, `@Qualifier`/`@Primary`/by-name disambiguation, `List`/`Optional` unwrapping, inherited `@Autowired` fields, conditional-assembly annotations recorded as metadata; validated 100% against hand-computed ground truth on spring-petclinic and two bundled fixtures (12/8 and 30/24 bean/edge baselines asserted by `gradle test`)
+  - **Tiered runtimes with graceful degradation** (`perceive.py`): structure.json (JDK 17+) → structure.vg query file (Go 1.27+) → `scv-structure` MCP registration hint (vectra-mcp); every missing tier degrades to a single attributable footnote, never fails the run; `@ConditionalOn*`/`@Profile` truth values are flagged, not guessed
+  - **Security policy**: remote-cloned repositories are analyzed in a no-build degraded mode (`structure_build_execution: local-only` default) — build tools never execute inside untrusted repos
+  - **Circular-dependency grading**: constructor cycles reported as startup-fatal, field/setter cycles as tolerated (container-tolerated)
+  - **SCV touchpoints (bilingual)**: `run.md` Step 5.5, ARCHITECTURE template "Component Dependencies" section rendered strictly from structure.json, `structure_analysis_enabled` / `structure_build_execution` config keys, install.sh whitelist copy
+- **Subagent evaluation (`eval/ --target agent`)** — smelt agent-mode evaluation for `project-analyzer` (both languages): 4+4 behavior cases (four-doc workflow discipline, structure-data rendering, deep-analysis mode gating), mini-orders Spring Boot fixture with an embedded constructor cycle, sandboxed tool set, `WriteContains` content assertions
+- **Design docs** — audited spec + implementation plan under `docs/superpowers/` (two-round subagent audit; five blockers fixed pre-implementation)
+
+### Changed
+- **`project-analyzer` subagent (en + zh-cn)** — evaluation-driven improvements:
+  - frontmatter `name` field added; non-existent `LSP` tool removed from the allowlist
+  - new **Boundaries** section: deliverables-only, read-only analysis, no shell when deep analysis is off (hard rule at the execution step), hand-back conditions, fail-loudly rule
+  - Structure Data rendering instruction and checklist items added; Chinese output must use 「启动级」/「容忍级」 cycle-grading wording
+  - "Bean injection" → "dependency injection" (vocabulary rules); Phase 2.5 examples compressed, duplicated guidance consolidated
+
+### Evaluation results (smelt, n=1 per case)
+- project-analyzer en: overall **77.1 (C) → 95.1 (A)**; behavior 75.0 → 100.0
+- project-analyzer zh: overall **73.7 (C) → 94.7 (A)**; behavior 70.8 → 100.0
+- Static lint en 85.4 → 100.0 · zh 78.7 → 97.8
+
 ## [v0.8.0] - 2026-10-13
 
 ### Added
