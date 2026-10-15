@@ -431,8 +431,9 @@ def resolve_type_name(name: str, package: str, imports: list[ImportDecl],
 
 # ---- extraction ----
 
-def extract(repo: Path, out) -> None:
-    """Emit the structure graph of ``repo`` into ``out`` (Graph_out).
+def extract(repo: Path, out) -> list[JavaFile]:
+    """Emit the structure graph of ``repo`` into ``out`` (Graph_out) and
+    return the parsed files (consumed by the language extensions).
 
     Three phases: every node is declared first, then type-level edges are
     resolved (cross-file edges must not drop merely because the target's file
@@ -478,6 +479,7 @@ def extract(repo: Path, out) -> None:
                     _scan_body(out, member, body_node, src_key, jf, fqn,
                                types_by_fqn, supers_map, source_fqns,
                                field_cache)
+    return java_files
 
 
 def _emit_type_nodes(out, fqn: str, td: TypeDecl) -> None:

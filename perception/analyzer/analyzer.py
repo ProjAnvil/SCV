@@ -20,6 +20,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # direct-script runs
 
+from extensions import registry
 from structure import java_extractor
 from structure.model import Graph_out
 
@@ -44,7 +45,8 @@ def main(argv: list[str] | None = None) -> int:
         parser.error(f"{repo} is not a directory")
 
     out = Graph_out(extensions=args.extensions)
-    java_extractor.extract(repo, out)
+    java_files = java_extractor.extract(repo, out)
+    registry.run(args.extensions, java_files, out)
     payload = out.to_json()
 
     out_path = Path(args.out_json)
@@ -61,6 +63,10 @@ def main(argv: list[str] | None = None) -> int:
           "call_edges={call_edges} dropped_edges={dropped_edges} "
           "unresolved_refs={unresolved_refs} key_collisions={key_collisions}"
           .format(**st))
+    if args.extensions:
+        meta = payload["meta"]
+        print(f"beans: {meta['beans']} inject_edges: {meta['inject_edges']} "
+              f"ambiguous: {meta['ambiguous']} unresolved: {payload['unresolved']}")
     return 0
 
 
