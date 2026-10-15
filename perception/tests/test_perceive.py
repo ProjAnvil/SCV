@@ -266,11 +266,17 @@ class UvProbeTests(unittest.TestCase):
             self.assertIn("network unreachable", log)
 
     def test_probe_timeout_proceeds(self):
-        # same ruling as rc != 0: a hung probe is provisioning trouble
-        with mock.patch.object(perceive.shutil, "which", return_value="/usr/bin/uv"), \
-             mock.patch.object(perceive.subprocess, "run",
-                               side_effect=subprocess.TimeoutExpired(cmd="uv", timeout=1)):
-            self.assertEqual(perceive.probe_uv(), "/usr/bin/uv")
+        # same ruling as rc != 0: a hung probe is provisioning trouble, and
+        # the exception branch logs its tail just like the rc != 0 branch
+        with TemporaryDirectory() as d:
+            d = Path(d)
+            with mock.patch.object(perceive.shutil, "which", return_value="/usr/bin/uv"), \
+                 mock.patch.object(perceive.subprocess, "run",
+                                   side_effect=subprocess.TimeoutExpired(cmd="uv", timeout=1)):
+                self.assertEqual(perceive.probe_uv(d), "/usr/bin/uv")
+            log = (d / "perception.log").read_text(encoding="utf-8")
+            self.assertIn("uv probe failed", log)
+            self.assertIn("timed out", log.lower())
 
 
 class FootnoteTests(unittest.TestCase):

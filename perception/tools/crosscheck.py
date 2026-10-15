@@ -118,6 +118,18 @@ def describe_diff(kind: str, want: Counter, got: Counter, limit: int = 10) -> li
     return lines
 
 
+# Vacuous-pass floor: if BOTH engines somehow emitted nothing (empty dumps,
+# a silently degraded engine), the multiset diff would be trivially empty.
+# Pin the frozen per-fixture bean counts so that fails loudly instead.
+FLOOR_BEANS = {
+    "gradle-lombok-sample": 12,
+    "boot2-legacy": 15,
+    "boot3-modern": 12,
+    "boot2-multi": 6,
+    "torture-app": 30,
+}
+
+
 def main() -> int:
     if not shutil.which("uv"):
         die("uv not on PATH")
@@ -139,12 +151,17 @@ def main() -> int:
                  str(ANALYZER / "analyzer.py"), str(ts_repo), str(ts_out),
                  "--extensions", "springboot"], ts_out)
 
-            bean_diff = describe_diff("bean", bean_tuples(spoon), bean_tuples(ts))
+            ts_beans = bean_tuples(ts)
+            floor = []
+            if sum(ts_beans.values()) != FLOOR_BEANS[name]:
+                floor.append(f"    treesitter beans={sum(ts_beans.values())}, expected "
+                             f"{FLOOR_BEANS[name]} (frozen ground truth)")
+            bean_diff = describe_diff("bean", bean_tuples(spoon), ts_beans)
             edge_diff = describe_diff("edge", edge_tuples(spoon), edge_tuples(ts))
-            if bean_diff or edge_diff:
+            if floor or bean_diff or edge_diff:
                 failures += 1
                 print(f"FAIL {name}")
-                for line in bean_diff + edge_diff:
+                for line in floor + bean_diff + edge_diff:
                     print(line)
             else:
                 print(f"PASS {name} "

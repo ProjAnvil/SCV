@@ -20,6 +20,7 @@ import sys
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "adapters/springboot/src/test/resources/fixtures"
@@ -47,22 +48,16 @@ def _copy_fixture(src_root: Path, name: str, dst: Path) -> None:
 
 
 def _path_without(tool: str) -> str:
-    """The parent PATH minus the directory holding `tool` (a no-<tool>
-    environment that still has everything else, e.g. go)."""
-    hit = shutil.which(tool)
-    drop = Path(hit).resolve().parent if hit else None
-    parts = []
-    for entry in os.environ.get("PATH", "").split(os.pathsep):
-        if not entry:
-            continue
-        if drop is not None:
-            try:
-                if Path(entry).resolve() == drop:
-                    continue
-            except OSError:
-                pass
-        parts.append(entry)
-    return os.pathsep.join(parts)
+    """The parent PATH minus every entry that can produce `tool` (a
+    no-<tool> environment that still has everything else, e.g. go).
+
+    Entry-wise `which(tool, path=<entry>)` — NOT resolve()-based dir matching,
+    which breaks for symlinked installs (Homebrew go -> Cellar): following the
+    symlink lands in the cellar dir, the bin dir holding the link never
+    matches, and the tool stays reachable. Entry-wise probing also drops
+    every co-installed copy, not just the first hit."""
+    return os.pathsep.join(e for e in os.environ.get("PATH", "").split(os.pathsep)
+                           if e and shutil.which(tool, path=e) is None)
 
 
 def _chain_env(home: Path, dist: Path, cfg=None, path=None):
@@ -223,6 +218,28 @@ class StructureModeTests(unittest.TestCase):
 
 class DegradedPathTests(unittest.TestCase):
     """Toolchain-degradation paths that need no toolchain to test."""
+
+    def test_path_without_strips_symlinked_install(self):
+        # brew-style installs: the PATH entry is the bin dir holding a
+        # SYMLINK to the real binary. A resolve()-based dir match follows
+        # the link into the cellar, never matches the entry, and leaves the
+        # tool reachable (review fix round 1). Entry-wise probing strips it
+        # — and every co-installed copy too.
+        uv = shutil.which("uv")
+        if uv is None:
+            self.skipTest("uv not on PATH")
+        with TemporaryDirectory() as d:
+            bin_dir = Path(d) / "bin"
+            bin_dir.mkdir()
+            (bin_dir / "uv").symlink_to(Path(uv).resolve())
+            with mock.patch.dict(os.environ, {"PATH": f"{bin_dir}{os.pathsep}{os.environ['PATH']}"}):
+                stripped = _path_without("uv")
+            self.assertIsNone(shutil.which("uv", path=stripped),
+                              "symlinked install still reachable after strip")
+
+    def test_path_without_keeps_other_tools(self):
+        stripped = _path_without("definitely-not-a-real-tool-xyz")
+        self.assertEqual(stripped, os.environ.get("PATH", ""))
 
     def test_not_framework_silent(self):
         with TemporaryDirectory() as d:
