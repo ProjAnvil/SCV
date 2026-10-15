@@ -1,0 +1,17 @@
+[project]
+name = "scv-perception-analyzer"
+version = "0.1.0"
+description = "SCV perception v2 analyzer - tree-sitter structure extraction (Java v1)"
+requires-python = ">=3.11"
+dependencies = [
+    "tree-sitter>=0.25,<0.26",
+    "tree-sitter-java>=0.23,<0.24",
+]
+
+[dependency-groups]
+dev = ["pytest>=8"]
+
+# App-style project: run via `uv run python analyzer.py ...`, never installed
+# as a package (repo precedent: eval/ ships uv.lock the same way).
+[tool.uv]
+package = false
