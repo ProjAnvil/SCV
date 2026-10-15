@@ -244,17 +244,33 @@ class UvProbeTests(unittest.TestCase):
         self.assertTrue(cmd[3].endswith("analyzer"))  # --project perception/analyzer
         self.assertEqual(cmd[-3:], ["python", "-c", "pass"])
 
-    def test_probe_command_failure_returns_none(self):
+    def test_probe_command_failure_proceeds(self):
+        # rc != 0 is provisioning trouble, NOT a missing runtime: the probe
+        # must return uv so run_analyzer gets the honest chance to fail as
+        # analyzer-failed (never uv-missing).
         with mock.patch.object(perceive.shutil, "which", return_value="/usr/bin/uv"), \
              mock.patch.object(perceive.subprocess, "run") as run:
-            run.return_value = subprocess.CompletedProcess(args=[], returncode=2)
-            self.assertIsNone(perceive.probe_uv())
+            run.return_value = subprocess.CompletedProcess(args=[], returncode=2, stderr="lock error")
+            self.assertEqual(perceive.probe_uv(), "/usr/bin/uv")
 
-    def test_probe_timeout_returns_none(self):
+    def test_probe_failure_logs_tail(self):
+        with TemporaryDirectory() as d:
+            d = Path(d)
+            with mock.patch.object(perceive.shutil, "which", return_value="/usr/bin/uv"), \
+                 mock.patch.object(perceive.subprocess, "run") as run:
+                run.return_value = subprocess.CompletedProcess(
+                    args=[], returncode=1, stderr="uv: network unreachable")
+                self.assertEqual(perceive.probe_uv(d), "/usr/bin/uv")
+            log = (d / "perception.log").read_text(encoding="utf-8")
+            self.assertIn("uv probe failed", log)
+            self.assertIn("network unreachable", log)
+
+    def test_probe_timeout_proceeds(self):
+        # same ruling as rc != 0: a hung probe is provisioning trouble
         with mock.patch.object(perceive.shutil, "which", return_value="/usr/bin/uv"), \
              mock.patch.object(perceive.subprocess, "run",
                                side_effect=subprocess.TimeoutExpired(cmd="uv", timeout=1)):
-            self.assertIsNone(perceive.probe_uv())
+            self.assertEqual(perceive.probe_uv(), "/usr/bin/uv")
 
 
 class FootnoteTests(unittest.TestCase):
@@ -493,6 +509,35 @@ class EndToEndTests(unittest.TestCase):
             self.assertFalse((out / "structure.json").exists())
             log = (out / "perception.log").read_text(encoding="utf-8")
             self.assertIn("uv probe: not found", log)
+            self.assertNotIn("uv probe failed", log)  # absent ≠ provisioning failure
+
+    def test_uv_probe_failure_shim_is_analyzer_failed(self):
+        # uv PRESENT but `uv run` provisioning fails (network/lock): the run
+        # must NOT report uv-missing — it proceeds to the analyzer tier, which
+        # fails through the same shim and lands on analyzer-failed with both
+        # tails in perception.log (folded T5-review fix).
+        with TemporaryDirectory() as d:
+            d = Path(d)
+            shim_dir = d / "shim"
+            shim_dir.mkdir()
+            shim = shim_dir / "uv"
+            shim.write_text('#!/bin/sh\necho "shim uv: lock unavailable (network down)" >&2\nexit 1\n')
+            shim.chmod(0o755)
+            repo = _springboot_repo(d / "repo")
+            out = d / "analysis"
+            res = _run_perceive(repo, out, cfg={},
+                                env_extra={"PATH": f"{shim_dir}:{MINIMAL_PATH}"})
+            self.assertEqual(res.returncode, 0, res.stderr)
+            payload = _payload(res)
+            self.assertEqual(payload["status"], "skipped")
+            self.assertEqual(payload["reason"], "analyzer-failed")
+            self.assertIn("analysis incomplete (see perception.log)", payload["footnote"])
+            self.assertNotIn("runtime not found", payload["footnote"])
+            self.assertFalse((out / "structure.json").exists())
+            log = (out / "perception.log").read_text(encoding="utf-8")
+            self.assertIn("uv probe failed", log)       # provisioning tail logged
+            self.assertIn("lock unavailable", log)
+            self.assertIn("tier3 analyzer rc=1", log)   # and the analyzer run's tail
 
     def test_structure_mode_marker_only_detection(self):
         with TemporaryDirectory() as d:

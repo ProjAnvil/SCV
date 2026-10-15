@@ -176,10 +176,15 @@ def resolve_extensions(cfg: dict):
     return resolved, warnings
 
 
-def probe_uv():
-    """Return the uv executable when uv is on PATH AND the analyzer project
-    can run its Python interpreter (`uv run ... python -c pass` — this both
-    checks the Python 3.11+ runtime uv would use and warms the project env)."""
+def probe_uv(analysis_dir: Path | None = None):
+    """Return the uv executable when uv is on PATH, else None (uv-missing).
+
+    A FAILING `uv run ... python -c pass` probe (environment provisioning
+    trouble: network, lock, disk) is NOT uv-missing — that would misreport a
+    present runtime as absent. The probe's stderr tail is logged to
+    perception.log (when analysis_dir is given) and the uv path is returned
+    anyway: run_analyzer then gets its own honest chance to succeed, or fail
+    through the analyzer-failed path with its tail in the log."""
     uv = shutil.which("uv")
     if not uv:
         return None
@@ -187,9 +192,16 @@ def probe_uv():
         res = subprocess.run(
             [uv, "run", "--project", str(PERCEPTION_ROOT / "analyzer"), "python", "-c", "pass"],
             capture_output=True, text=True, timeout=TIER_TIMEOUT)
-    except (OSError, subprocess.TimeoutExpired):
-        return None
-    return uv if res.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired) as e:
+        if analysis_dir is not None:
+            log_line(analysis_dir, f"tier2 uv probe failed (environment provisioning): {_exc_tail(e)}")
+        return uv
+    if res.returncode != 0:
+        if analysis_dir is not None:
+            tail = _log_tail(" ".join(filter(None, (res.stderr, res.stdout))))
+            log_line(analysis_dir, f"tier2 uv probe failed (environment provisioning): {tail}")
+        return uv
+    return uv
 
 
 def probe_go():
@@ -378,7 +390,7 @@ def main() -> int:
         # substitute analyzer executable: invoked directly, no uv involved
         log_line(analysis_dir, "tier2 analyzer override active (SCV_PERCEPTION_ANALYZER)")
     else:
-        uv_bin = probe_uv()
+        uv_bin = probe_uv(analysis_dir)
         log_line(analysis_dir, f"tier2 uv probe: {uv_bin or 'not found'}")
         if not uv_bin:
             emit["reason"] = "uv-missing"

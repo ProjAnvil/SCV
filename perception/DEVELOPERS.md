@@ -100,12 +100,14 @@ fixtures' ground truths in `analyzer/tests/test_fixtures.py` were derived
 from its output (multiset equality over (key, stereotype, conditions) for
 nodes and (srcKey, dstKey, via, qualifier, wraps, ambiguous) for edges);
 `make crosscheck` (perception/Makefile, tools/crosscheck.py) re-runs both
-engines over the 5 fixtures and diffs the same projection. Engine command
-chain when driving it manually:
+engines over the 5 fixtures and diffs the same projection. Spoon runs in
+GRADLE mode (classpath via the fixture's own build files; never modified)
+— noclasspath mode is degraded and would produce false mismatches. Engine
+command chain when driving it manually:
 
 ```
 cd perception/adapters/springboot && gradle installDist -q
-./build/install/springboot-probe/bin/springboot-probe noclasspath <fixture> /tmp/v1.json
+./build/install/springboot-probe/bin/springboot-probe gradle <fixture-copy> /tmp/v1.json
 ```
 
 ## Vocabulary warning
