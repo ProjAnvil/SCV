@@ -37,10 +37,10 @@ type repoInfo struct {
 }
 
 type store struct {
-	dir     string
-	mu      sync.Mutex
-	files   map[string]string   // repo name -> structure.vg path
-	graphs  map[string]*vectra.Graph
+	dir    string
+	mu     sync.Mutex
+	files  map[string]string // repo name -> structure.vg path
+	graphs map[string]*vectra.Graph
 }
 
 func newStore(dir string) *store {
@@ -233,9 +233,18 @@ func newServer(svc *service) *mcp.Server {
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "cypher",
 		Description: "Run a Cypher-subset query against one repository's structure graph. " +
-			"Nodes carry props: beanName, type, stereotype (RestController/Service/Repository/Configuration/...), conditions, source. " +
-			"Edges: label INJECTS with via/qualifier/ambiguous props. " +
-			"Example: MATCH (n {stereotype:'Service'})-[:INJECTS]->(m) RETURN n.key, m",
+			"Node labels and key shapes: " +
+			"Bean (key 'bean:<name>', props: beanName, type, stereotype (RestController/Service/Repository/Configuration/...), conditions, source); " +
+			"Type (key 'type:<fqn>', props: kind (class/interface/record/enum/annotation), modifiers, loc); " +
+			"Method (key 'fn:<fqn>#<name>(<params>)', props: name, visibility, static, params, returns, owner (Type key), loc); " +
+			"File (key 'file:<repo-relative path>', props: path, language, loc). " +
+			"Edge labels: INJECTS (Bean→Bean, props via/qualifier/wraps/ambiguous); " +
+			"CALLS (Method→Method, props line, kind direct|virtual-dispatch); " +
+			"IMPLEMENTS and EXTENDS (Type→Type); CONTAINS (File→Type); REFERENCES (Method→Type, prop line). " +
+			"Examples: " +
+			"MATCH (n {stereotype:'Service'})-[:INJECTS]->(m) RETURN n.key, m.key; " +
+			"MATCH (t:Type)-[:IMPLEMENTS]->(i {kind:'interface'}) RETURN t.key, i.key; " +
+			"MATCH (m:Method)-[:CALLS]->(n:Method {name:'greet'}) RETURN m.owner, m.name",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
 	}, svc.cypher)
 	mcp.AddTool(s, &mcp.Tool{

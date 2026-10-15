@@ -249,24 +249,32 @@ PERCEPTION_SRC="$SCRIPT_DIR/perception"
 PERCEPTION_TARGET="$SCV_DATA_DIR/perception"
 if [ -d "$PERCEPTION_SRC" ]; then
     create_dir "$PERCEPTION_TARGET"
-    mkdir -p "$PERCEPTION_TARGET/adapters" "$PERCEPTION_TARGET/dist"
+    mkdir -p "$PERCEPTION_TARGET/dist"
     cp "$PERCEPTION_SRC/perceive.py" "$PERCEPTION_TARGET/perceive.py"
     cp "$PERCEPTION_SRC/README.md" "$PERCEPTION_TARGET/README.md"
-    # rm -rf before cp -r: a plain cp -r into an existing target dir would nest
-    # (loader/loader/...) on re-install and break the adapter source hash.
+    # rm -rf before every cp -r: a plain cp -r into an existing target dir
+    # would nest (loader/loader/...) on re-install.
     rm -rf "$PERCEPTION_TARGET/loader"
     cp -r "$PERCEPTION_SRC/loader" "$PERCEPTION_TARGET/loader"
     rm -rf "$PERCEPTION_TARGET/graphmcp"
     cp -r "$PERCEPTION_SRC/graphmcp" "$PERCEPTION_TARGET/graphmcp"
+    # analyzer: the shipped analysis engine (uv.lock included for reproducible
+    # installs); tests/ and .venv/ are repo/user-machine state and stay behind.
+    rm -rf "$PERCEPTION_TARGET/analyzer"
+    cp -r "$PERCEPTION_SRC/analyzer" "$PERCEPTION_TARGET/analyzer"
+    rm -rf "$PERCEPTION_TARGET/analyzer/tests" \
+           "$PERCEPTION_TARGET/analyzer/.venv" \
+           "$PERCEPTION_TARGET/analyzer/.pytest_cache"
+    find "$PERCEPTION_TARGET/analyzer" -type d -name __pycache__ -prune -exec rm -rf {} +
+    # Adapter MANIFESTs are detect-only inputs (framework marker/confirm
+    # rules); adapter sources and build files are NOT shipped — the whole
+    # adapters tree is replaced so a v1-era install leaves nothing behind.
+    rm -rf "$PERCEPTION_TARGET/adapters"
     for adapter_dir in "$PERCEPTION_SRC"/adapters/*/; do
         [ -d "$adapter_dir" ] || continue
         aid=$(basename "$adapter_dir")
         mkdir -p "$PERCEPTION_TARGET/adapters/$aid"
         cp "$adapter_dir/MANIFEST.json" "$PERCEPTION_TARGET/adapters/$aid/" 2>/dev/null || true
-        cp "$adapter_dir/build.gradle" "$adapter_dir/settings.gradle" "$PERCEPTION_TARGET/adapters/$aid/" 2>/dev/null || true
-        rm -rf "$PERCEPTION_TARGET/adapters/$aid/src"
-        cp -r "$adapter_dir/src" "$PERCEPTION_TARGET/adapters/$aid/src"
-        rm -rf "$PERCEPTION_TARGET/adapters/$aid/src/test"
     done
     echo -e "${GREEN}+${NC} perception runtime -> $PERCEPTION_TARGET"
 else

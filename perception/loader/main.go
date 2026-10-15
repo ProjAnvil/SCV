@@ -1,5 +1,6 @@
 // Command loader converts a structure.json (SCV Code Perception artifact schema)
-// into a vectra snapshot (.vg) and grades dependency cycles.
+// into a vectra snapshot (.vg) and grades bean dependency cycles (INJECTS
+// edges only; see grade for the filter rationale).
 package main
 
 import (
@@ -73,21 +74,39 @@ func loadGraph(jsonPath string) (*vectra.Graph, int) {
 	return gr, len(g.Nodes)
 }
 
-// loadAndGrade loads the graph and reports node/edge counts plus every
-// dependency cycle graded fatal vs tolerated: any INJECTS edge inside the
-// cycle whose via is constructor/lombok-constructor/beanMethod makes the
-// whole cycle fatal.
+// loadAndGrade loads the graph and reports node/edge counts plus every bean
+// dependency cycle graded fatal vs tolerated. Grading is INJECTS-only (spec
+// 2026-10-14 §7): the graph also carries CALLS edges (method-level mutual
+// recursion), and vectra's Cycles() is label-agnostic, so the intra-cycle
+// edges are filtered to INJECTS before via-inspection. A cycle whose members
+// connect without a single INJECTS edge (e.g. two methods calling each
+// other) is NOT reported at all — the user-facing cycle summary is about
+// bean dependencies, not call recursion.
 func loadAndGrade(jsonPath string) resultOut {
 	gr, nodeCount := loadGraph(jsonPath)
 	return grade(gr, nodeCount)
 }
 
 // grade is a read-only report on a sealed graph. Since vectra v0.5 the Cycle
-// value carries the intra-cycle edges with full props, so via-inspection no
-// longer re-joins EdgesOf records.
+// value carries the intra-cycle edges with full label/props, so label
+// filtering and via-inspection no longer re-join EdgesOf records.
 func grade(gr *vectra.Graph, nodeCount int) resultOut {
 	out := resultOut{Nodes: nodeCount, Edges: gr.EdgeCount(), Cycles: []cycleOut{}}
 	for _, c := range gr.Cycles() {
+		injects := 0
+		fatal := false
+		for _, e := range c.Edges {
+			if e.Label != "INJECTS" {
+				continue
+			}
+			injects++
+			if via, ok := e.Props["via"].(string); ok && fatalVia[via] {
+				fatal = true
+			}
+		}
+		if injects == 0 {
+			continue // non-INJECTS cycle (CALLS recursion etc.) — not user-facing
+		}
 		members := make([]string, 0, len(c.Nodes))
 		for _, id := range c.Nodes {
 			if n, ok := gr.NodeByID(id); ok {
@@ -95,10 +114,8 @@ func grade(gr *vectra.Graph, nodeCount int) resultOut {
 			}
 		}
 		grade := "tolerated"
-		for _, e := range c.Edges {
-			if via, ok := e.Props["via"].(string); ok && fatalVia[via] {
-				grade = "fatal"
-			}
+		if fatal {
+			grade = "fatal"
 		}
 		out.Cycles = append(out.Cycles, cycleOut{Nodes: members, Grade: grade})
 	}

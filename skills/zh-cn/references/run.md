@@ -176,7 +176,7 @@ cat ~/.scv/config.json 2>/dev/null | grep -q '"deep_analysis_enabled"[[:space:]]
 
 首次运行提示：
 ```
-🔍 正在进行深度结构分析，首次运行可能需要数分钟（含组件构建与依赖下载）。
+🔍 正在进行深度结构分析，首次运行需要准备分析环境，通常在半分钟内。
 ```
 
 执行：
@@ -184,12 +184,18 @@ cat ~/.scv/config.json 2>/dev/null | grep -q '"deep_analysis_enabled"[[:space:]]
 python3 ~/.scv/perception/perceive.py {analysis_path} ~/.scv/analysis/{repo_name} --source {local|remote} --lang zh-cn
 ```
 
-解读 stdout 单行 JSON：`not-framework` → 直接进入 Step 6；`skipped` → 将 `footnote` 原样放入 Step 8 报告；`ok` → 用 `counts` 渲染摘要行、把 `artifacts.structure_json` 传入 Step 6 子代理、`mcp_add` 非空时渲染为可复制命令块。`cycles_fatal` 为 null（查询文件层级被跳过，循环计数缺失）时，省略摘要行中的循环依赖子句。
+解读 stdout 单行 JSON：`not-framework` → 直接进入 Step 6；`skipped` → 将 `footnote` 原样放入 Step 8 报告；`ok` → 按下述模式渲染摘要行、把 `artifacts.structure_json` 传入 Step 6 子代理、`mcp_add` 非空时渲染为可复制命令块。`cycles_fatal` 为 null（查询文件层级被跳过，循环计数缺失）时，省略摘要行中的循环依赖子句。
 
-摘要行：
-```
-🧭 深度结构分析：检测到 Spring Boot 项目 — {components} 个组件、{edges} 条依赖边、循环依赖 {cycles_fatal + cycles_tolerated} 处（{cycles_fatal} 处启动级 / {cycles_tolerated} 处容忍级）。
-```
+摘要行 — 两种渲染模式：
+
+- **结构模式**（`structure_summary` 非空且 `counts.components` 为 null/0（无组件层）—— 所有语言扩展均已关闭）：直接渲染 JSON 中现成的 `structure_summary` 字符串：
+  ```
+  🧭 深度结构分析：{structure_summary}。
+  ```
+- **组件模式**（其余情况）：用 `counts` 渲染：
+  ```
+  🧭 深度结构分析：检测到 Spring Boot 项目 — {components} 个组件、{edges} 条依赖边、循环依赖 {cycles_fatal + cycles_tolerated} 处（{cycles_fatal} 处启动级 / {cycles_tolerated} 处容忍级）。
+  ```
 
 若 `footnote` 非空（存在降级层级），将其单行追加在摘要行之后。
 

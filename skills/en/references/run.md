@@ -181,7 +181,7 @@ Determine `--source`: `remote` if the repository was cloned from a remote URL (S
 
 If this is the first run on this machine, tell the user:
 ```
-🔍 Deep structural analysis in progress; the first run may take a few minutes (component build + dependency download).
+🔍 Deep structural analysis in progress; the first run prepares the analysis environment, typically under half a minute.
 ```
 
 Run:
@@ -195,13 +195,19 @@ python3 ~/.scv/perception/perceive.py {analysis_path} ~/.scv/analysis/{repo_name
 |---|---|
 | `status: not-framework` | nothing — proceed to Step 6 |
 | `status: skipped` | render `footnote` verbatim in the Step 8 completion report (perception section) |
-| `status: ok` | render the summary line below from `counts`; store `artifacts.structure_json` for the Step 6 prompt; if `mcp_add` is non-null, render it as a copyable command block |
+| `status: ok` | render the summary line below (mode per its rules); store `artifacts.structure_json` for the Step 6 prompt; if `mcp_add` is non-null, render it as a copyable command block |
 | `cycles_fatal` null | cycle counts are null when the query-file (loader) tier was skipped — omit the cycle clause from the summary line |
 
-Summary line (render from counts):
-```
-🧭 Deep structural analysis: Spring Boot project — {components} components, {edges} dependency edges, {cycles_fatal + cycles_tolerated} circular dependencies ({cycles_fatal} startup-fatal / {cycles_tolerated} tolerated).
-```
+Summary line — two rendering modes:
+
+- **Structure mode** (`structure_summary` is non-null AND `counts.components` is null/0 — no component layer, all language extensions off): render the ready-made `structure_summary` string from the JSON:
+  ```
+  🧭 Deep structural analysis: {structure_summary}.
+  ```
+- **Component mode** (otherwise): render from `counts`:
+  ```
+  🧭 Deep structural analysis: Spring Boot project — {components} components, {edges} dependency edges, {cycles_fatal + cycles_tolerated} circular dependencies ({cycles_fatal} startup-fatal / {cycles_tolerated} tolerated).
+  ```
 If `footnote` is non-empty (degraded tiers), append it after the summary line, single line.
 
 **Never** fail the run because of this step; perceive.py always exits 0 and its JSON is the single source of truth for wording.
