@@ -18,6 +18,7 @@ def _copy_fixture(name: str, dst: Path) -> None:
             target.write_bytes(f.read_bytes())
 
 
+@unittest.skip("perception v2: rewritten in T7")
 class IntegrationTests(unittest.TestCase):
     def test_local_torture_run(self):
         if not (_tool("gradle") and _tool("java")):

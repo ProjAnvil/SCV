@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
-"""SCV Code Perception orchestrator.
+"""SCV Code Perception orchestrator (v2 — uv + Python + tree-sitter engine).
 
 Contract (spec 2026-10-13 rev2 §5.1): single-line JSON on stdout, exit 0 always.
 Usage: perceive.py <repo_path> <analysis_dir> --source local|remote [--lang zh|en]
+
+v2 (spec 2026-10-14): the JDK/Gradle dist tiers are gone — the analyzer runs
+via `uv run --project perception/analyzer`; language extensions are gated by
+the `structure_extensions` config key (default ["springboot"]); no build ever
+executes inside the analyzed repo (local and remote are analyzed identically,
+`--source` is still recorded for audit).
 """
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import re
@@ -21,23 +26,16 @@ PERCEPTION_ROOT = Path(__file__).resolve().parent
 DIST_ROOT = Path(os.environ.get("SCV_PERCEPTION_DIST", Path.home() / ".scv/perception/dist"))
 TIER_TIMEOUT = 600  # seconds per tier
 
-# (zh, en) — reason codes never contain tool names (spec §5.3)
+# (zh, en) — reason codes never contain tool names (spec §5.3); the missing
+# runtime footnote names the runtime, not the tool (spec 2026-10-14 §1).
 FOOTNOTES = {
-    "jdk-missing": (
-        "已跳过深度结构分析：未检测到 JDK 17+（可选增强，安装后重新运行 /scv run 即可启用）",
-        "Deep structural analysis skipped: JDK 17+ not found (optional; re-run /scv run after installing)",
+    "uv-missing": (
+        "已跳过深度结构分析：未检测到 Python 3.11+ 运行环境（可选增强，安装后重新运行 /scv run 即可启用）",
+        "Deep structural analysis skipped: Python 3.11+ runtime not found (optional; re-run /scv run after installing)",
     ),
-    "adapter-build-failed": (
-        "已跳过深度结构分析：分析组件构建失败（原因码记录于 perception.log，可重试）",
-        "Deep structural analysis skipped: analyzer build failed (reason logged; retryable)",
-    ),
-    "adapter-failed": (
-        "已跳过深度结构分析：分析未完成（已尝试降级，详情见 perception.log）",
-        "Deep structural analysis skipped: analysis incomplete after fallback (see perception.log)",
-    ),
-    "degraded-noclasspath": (
-        "深度结构分析以降级模式完成，结果可能包含更多不确定标注",
-        "Deep structural analysis completed in degraded mode; results may carry extra uncertainty flags",
+    "analyzer-failed": (
+        "已跳过深度结构分析：分析未完成（详情见 perception.log）",
+        "Deep structural analysis skipped: analysis incomplete (see perception.log)",
     ),
     "go-missing": (
         "结构图查询文件未生成（可选增强，需要 Go 1.27+ 运行环境）",
@@ -48,6 +46,17 @@ FOOTNOTES = {
         "Graph query service not found (optional; see ~/.scv/perception/README.md)",
     ),
 }
+
+# Structure-mode summary wording (spec 2026-10-14 §6, verbatim) — surfaced as
+# the `structure_summary` stdout field so report rendering needs no logic.
+STRUCTURE_SUMMARY = (
+    "{types} 个类型、{methods} 个方法、{call_edges} 条调用边",
+    "{types} types, {methods} methods, {call_edges} call edges",
+)
+
+# Language extensions known to the shipped analyzer (spec §7: config key
+# `structure_extensions`, default ["springboot"]; unknown values warn + drop).
+KNOWN_EXTENSIONS = ("springboot",)
 
 
 def log_line(analysis_dir: Path, message: str) -> None:
@@ -92,6 +101,14 @@ def _iter_source_roots(repo: Path, max_depth: int = 3):
             yield root
 
 
+def _has_java_source(repo: Path) -> bool:
+    for root in _iter_source_roots(repo):
+        for _dirpath, _dirnames, filenames in os.walk(root):
+            if any(f.endswith(".java") for f in filenames):
+                return True
+    return False
+
+
 def detect_framework(repo: Path, manifest: dict) -> bool:
     det = manifest["detect"]
     candidate = False
@@ -128,42 +145,51 @@ def detect_framework(repo: Path, manifest: dict) -> bool:
     return False
 
 
-def resolve_mode(repo: Path, source: str, policy: str) -> str:
-    if policy == "never":
-        return "noclasspath"
-    if source == "remote" and policy != "always":
-        return "noclasspath"  # security: never execute builds inside untrusted repos
-    if (repo / "pom.xml").is_file():
-        return "maven"
-    # system gradle only counts when the repo itself is a Gradle project;
-    # otherwise host tooling would leak into detection (test_no_build_tool)
-    has_gradle_build = (repo / "build.gradle").is_file() or (repo / "build.gradle.kts").is_file()
-    if (repo / "gradlew").is_file() or (has_gradle_build and shutil.which("gradle")):
-        return "gradle"
-    return "noclasspath"
+def detect_java_marker_only(repo: Path, manifest: dict) -> bool:
+    """Empty-extension degrade (spec 2026-10-14 §3): any MANIFEST marker file
+    plus at least one .java source under a discovered source root — the
+    structure core still runs on non-Spring Java repos."""
+    for _ in _iter_marker_files(repo, manifest["detect"]["marker_files"]):
+        return _has_java_source(repo)
+    return False
 
 
-def parse_java_version(out: str):
-    m = re.search(r'version "(\d+)(?:\.(\d+))?', out)
-    if not m:
+def resolve_extensions(cfg: dict):
+    """Validate `structure_extensions` (default ["springboot"]).
+
+    Unknown values (and non-list shapes) never fail the run: they are dropped
+    from the list passed to the analyzer and reported as warning lines (the
+    caller flushes them into perception.log AFTER stale cleanup, which wipes
+    the log — spec §7; the analyzer-side registry double-checks)."""
+    raw = cfg.get("structure_extensions")
+    if raw is None:
+        return list(KNOWN_EXTENSIONS), []
+    if not isinstance(raw, list):
+        return [], [f"config structure_extensions not a list ({raw!r}) — ignored"]
+    resolved: list[str] = []
+    warnings: list[str] = []
+    for name in raw:
+        if name in KNOWN_EXTENSIONS and name not in resolved:
+            resolved.append(name)
+        elif name not in KNOWN_EXTENSIONS:
+            warnings.append(f"config structure_extensions unknown value {name!r} — dropped")
+    return resolved, warnings
+
+
+def probe_uv():
+    """Return the uv executable when uv is on PATH AND the analyzer project
+    can run its Python interpreter (`uv run ... python -c pass` — this both
+    checks the Python 3.11+ runtime uv would use and warms the project env)."""
+    uv = shutil.which("uv")
+    if not uv:
         return None
-    major = int(m.group(1))
-    minor = int(m.group(2) or 0)
-    return 8 if major == 1 and minor else major
-
-
-def probe_java():
-    for cmd in (["java", "-version"], [str(Path(os.environ.get("JAVA_HOME", "")) / "bin" / "java"), "-version"] if os.environ.get("JAVA_HOME") else None):
-        if not cmd:
-            continue
-        try:
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        except (OSError, subprocess.TimeoutExpired):
-            continue
-        version = parse_java_version(res.stderr or res.stdout)
-        if version:
-            return version
-    return None
+    try:
+        res = subprocess.run(
+            [uv, "run", "--project", str(PERCEPTION_ROOT / "analyzer"), "python", "-c", "pass"],
+            capture_output=True, text=True, timeout=TIER_TIMEOUT)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return uv if res.returncode == 0 else None
 
 
 def probe_go():
@@ -196,28 +222,6 @@ def cleanup_stale(analysis_dir: Path) -> None:
             p.unlink()
 
 
-def adapter_source_hash(adapter_dir: Path) -> str:
-    h = hashlib.sha256()
-    for f in sorted(adapter_dir.rglob("*")):
-        if not f.is_file():
-            continue
-        s = str(f.relative_to(adapter_dir))
-        if s.startswith(("build/", ".gradle/", "src/test/")):
-            continue
-        h.update(s.encode())
-        h.update(f.read_bytes())
-    return h.hexdigest()
-
-
-def _os_bin(dist_dir: Path, name: str) -> Path:
-    sub = "bin/" + (name + ".bat" if os.name == "nt" else name)
-    return dist_dir / sub
-
-
-def _record_build_error(e) -> None:
-    sys.stderr.write(f"adapter build error: {e}\n")
-
-
 def _log_tail(text: str, limit: int = 2000) -> str:
     """Collapse whitespace and keep the tail so one event stays one log line."""
     return " ".join((text or "").split())[-limit:]
@@ -228,70 +232,54 @@ def _exc_tail(e) -> str:
     return _log_tail(detail)
 
 
-def _usable_dist(dist_dir: Path, adapter_id: str) -> Path | None:
-    """A dist counts as usable when its launcher binary is present."""
-    return dist_dir if _os_bin(dist_dir, adapter_id + "-probe").exists() else None
-
-
-def ensure_dist(adapter: dict, analysis_dir: Path) -> Path | None:
-    adapter_dir = PERCEPTION_ROOT / "adapters" / adapter["id"]
-    dist_dir = DIST_ROOT / adapter["id"]
-    hash_file = dist_dir / ".source-hash"
-    current = adapter_source_hash(adapter_dir)
-    if dist_dir.exists():
-        bin_path = _os_bin(dist_dir, adapter["id"] + "-probe")
-        if (bin_path.exists() and hash_file.exists()
-                and hash_file.read_text().strip() == current):
-            return dist_dir
-    try:
-        subprocess.run(adapter["build"], shell=True, cwd=adapter_dir,
-                       capture_output=True, text=True, timeout=TIER_TIMEOUT, check=True)
-    except (subprocess.SubprocessError, OSError) as e:
-        # Ruling (pre-flight scan): a failed rebuild must not discard a
-        # previously built, still-usable dist — reuse it and log; only give
-        # up when no usable dist exists. Log the cause BEFORE the
-        # reuse-or-None decision (fix round 1: footnotes point at
-        # perception.log, so the log must carry the reason).
-        log_line(analysis_dir, f"tier4 adapter build failed: {_exc_tail(e)}")
-        _record_build_error(e)
-        reused = _usable_dist(dist_dir, adapter["id"]) if dist_dir.exists() else None
-        if reused:
-            sys.stderr.write(f"adapter build error: reusing previous dist at {dist_dir}\n")
-            return dist_dir
-        return None
-    install_dir = adapter_dir / "build" / "install" / (adapter["id"] + "-probe")
-    if not _os_bin(install_dir, adapter["id"] + "-probe").exists():
-        err = RuntimeError(f"installDist produced no launcher in {install_dir}")
-        log_line(analysis_dir, f"tier4 adapter build failed: {err}")
-        _record_build_error(err)
-        reused = _usable_dist(dist_dir, adapter["id"]) if dist_dir.exists() else None
-        return reused
-    # installDist writes under the adapter's build/ tree; stage the launcher
-    # tree into DIST_ROOT so the dist is self-contained and hash-keyed.
-    if dist_dir.exists():
-        shutil.rmtree(dist_dir)
-    shutil.copytree(install_dir, dist_dir, dirs_exist_ok=True)
-    hash_file.write_text(current)
-    return dist_dir
-
-
-def run_adapter(adapter: dict, dist_dir: Path, mode: str, repo: Path, out_json: Path,
-                analysis_dir: Path) -> bool:
-    bin_path = _os_bin(dist_dir, adapter["id"] + "-probe")
-    cmd = [str(bin_path), mode, str(repo), str(out_json)]
+def run_analyzer(repo: Path, out_json: Path, analysis_dir: Path, extensions: list[str]) -> bool:
+    """Run the v2 analyzer (uv tier). Honors SCV_PERCEPTION_ANALYZER (a
+    substitute analyzer executable invoked directly, bypassing uv — used by
+    tests with fakes that accept the same CLI). A duration line plus any
+    non-fatal stderr tail lands in perception.log on EVERY run."""
+    override = os.environ.get("SCV_PERCEPTION_ANALYZER")
+    if override:
+        cmd = [override, str(repo), str(out_json)]
+    else:
+        # the analyzer.py path must be absolute: `uv run --project` keeps the
+        # caller's CWD, so a bare "analyzer.py" would not resolve.
+        cmd = ["uv", "run", "--project", str(PERCEPTION_ROOT / "analyzer"),
+               "python", str(PERCEPTION_ROOT / "analyzer" / "analyzer.py"),
+               str(repo), str(out_json)]
+    if extensions:
+        cmd += ["--extensions", *extensions]
+    started = time.monotonic()
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=TIER_TIMEOUT)
     except (subprocess.SubprocessError, OSError) as e:
-        log_line(analysis_dir, f"tier5 adapter launch failed ({mode}): {e}")
+        log_line(analysis_dir, f"tier3 analyzer launch failed: {_exc_tail(e)}")
         return False
-    if res.returncode != 0 or not out_json.exists():
-        # Fix round 1: the adapter-failed footnote promises "see perception.log",
-        # so failures must land there, not only in swallowed subprocess buffers.
-        log_line(analysis_dir, f"tier5 adapter {mode} rc={res.returncode} "
-                               f"out={'yes' if out_json.exists() else 'no'} "
-                               f"stderr: {_log_tail(res.stderr)}")
-        return False
-    return True
+    duration = time.monotonic() - started
+    log_line(analysis_dir, f"tier3 analyzer rc={res.returncode} duration={duration:.1f}s "
+                           f"extensions={extensions} out={'yes' if out_json.exists() else 'no'}"
+                           + (f" stderr: {_log_tail(res.stderr)}" if res.stderr and res.stderr.strip() else ""))
+    return res.returncode == 0 and out_json.exists()
+
+
+def build_counts(graph: dict) -> dict:
+    """v2 counts (spec §6): components/edges are label-filtered (Bean nodes /
+    INJECTS edges — never len() of the mixed arrays, keeping v1 report
+    semantics) and the structure sub-counts ride along from meta."""
+    counts = {
+        "components": sum(1 for n in graph.get("nodes", []) if n.get("label") == "Bean"),
+        "edges": sum(1 for e in graph.get("edges", []) if e.get("label") == "INJECTS"),
+        "cycles_fatal": 0, "cycles_tolerated": 0,
+    }
+    structure = (graph.get("meta") or {}).get("structure") or {}
+    counts["structure"] = {k: structure.get(k) for k in ("files", "types", "methods", "call_edges")}
+    return counts
+
+
+def render_structure_summary(structure: dict, lang: str = "zh") -> str:
+    idx = 0 if lang.startswith("zh") else 1
+    return STRUCTURE_SUMMARY[idx].format(
+        types=structure.get("types"), methods=structure.get("methods"),
+        call_edges=structure.get("call_edges"))
 
 
 def run_loader(loader_dir: Path, json_path: Path, vg_path: Path, analysis_dir: Path):
@@ -351,7 +339,7 @@ def main() -> int:
     emit = {"status": "skipped", "reason": None,
             "tiers": {"json": False, "vg": False, "mcp_hint": False},
             "counts": None, "artifacts": {"structure_json": None, "structure_vg": None},
-            "mcp_add": None, "footnote": ""}
+            "structure_summary": None, "mcp_add": None, "footnote": ""}
 
     cfg_path = Path.home() / ".scv/config.json"
     try:
@@ -363,70 +351,64 @@ def main() -> int:
         log_line(analysis_dir, "tier0 disabled by config")
         print(json.dumps(emit, ensure_ascii=False))
         return 0
-    policy = cfg.get("structure_build_execution", "local-only")
+    extensions, ext_warnings = resolve_extensions(cfg)
 
     adapter = load_manifest("springboot")
-    if not detect_framework(repo, adapter):
+    if extensions:
+        detected = detect_framework(repo, adapter)
+        detect_line = "tier1 detect: springboot"
+    else:
+        # structure mode (all extensions off): marker-file-only Java detection
+        # so the language-agnostic core still runs on non-Spring Java repos.
+        detected = detect_java_marker_only(repo, adapter)
+        detect_line = "tier1 detect: java (marker-only)"
+    if not detected:
         emit["status"], emit["reason"] = "not-framework", None
         log_line(analysis_dir, "tier1 detect: not-framework")
         print(json.dumps(emit, ensure_ascii=False))
         return 0
 
     cleanup_stale(analysis_dir)
-    # Resolve and log the mode BEFORE any adapter execution (ruling: the tier1
-    # detect line must carry mode= so remote/noclasspath runs are auditable).
-    mode = resolve_mode(repo, args.source, policy)
-    log_line(analysis_dir, f"tier1 detect: springboot, source={args.source}, "
-                           f"policy={policy}, mode={mode}")
+    for warning in ext_warnings:
+        log_line(analysis_dir, warning)
+    log_line(analysis_dir, f"{detect_line}, source={args.source}, extensions={extensions}")
 
     reasons: list[str] = []
-    java = probe_java()
-    if not java or java < int(adapter["requires"]["jdk"]):
-        reasons.append("jdk-missing")
-        log_line(analysis_dir, f"tier3 jdk probe: {java}")
-        emit["reason"] = "jdk-missing"
-        emit["footnote"] = render_footnote(reasons, args.lang)
-        print(json.dumps(emit, ensure_ascii=False))
-        return 0
-
-    dist_dir = ensure_dist(adapter, analysis_dir)
-    if dist_dir is None:
-        emit["reason"] = "adapter-build-failed"
-        emit["footnote"] = render_footnote(["adapter-build-failed"], args.lang)
-        log_line(analysis_dir, "tier4 dist build failed")
-        print(json.dumps(emit, ensure_ascii=False))
-        return 0
+    if os.environ.get("SCV_PERCEPTION_ANALYZER"):
+        # substitute analyzer executable: invoked directly, no uv involved
+        log_line(analysis_dir, "tier2 analyzer override active (SCV_PERCEPTION_ANALYZER)")
+    else:
+        uv_bin = probe_uv()
+        log_line(analysis_dir, f"tier2 uv probe: {uv_bin or 'not found'}")
+        if not uv_bin:
+            emit["reason"] = "uv-missing"
+            emit["footnote"] = render_footnote(["uv-missing"], args.lang)
+            print(json.dumps(emit, ensure_ascii=False))
+            return 0
 
     structure_json = analysis_dir / "structure.json"
-    ok = run_adapter(adapter, dist_dir, mode, repo, structure_json, analysis_dir)
-    degraded = False
-    if not ok and mode != "noclasspath":
-        log_line(analysis_dir, f"tier5 mode {mode} failed; falling back to noclasspath")
-        ok = run_adapter(adapter, dist_dir, "noclasspath", repo, structure_json, analysis_dir)
-        degraded = ok
-    if not ok:
-        emit["reason"] = "adapter-failed"
-        emit["footnote"] = render_footnote(["adapter-failed"], args.lang)
-        log_line(analysis_dir, "tier5 adapter failed (incl. noclasspath fallback)")
+    if not run_analyzer(repo, structure_json, analysis_dir, extensions):
+        emit["reason"] = "analyzer-failed"
+        emit["footnote"] = render_footnote(["analyzer-failed"], args.lang)
         print(json.dumps(emit, ensure_ascii=False))
         return 0
 
     try:
         graph = json.loads(structure_json.read_text(encoding="utf-8"))
-        counts = {"components": len(graph["nodes"]), "edges": len(graph["edges"]),
-                  "cycles_fatal": 0, "cycles_tolerated": 0}
+        counts = build_counts(graph)
     except Exception as e:
-        # Exit-0 contract: unreadable/malformed adapter output degrades to the
-        # same adapter-failed skip as a crashed adapter — never a traceback.
-        emit["reason"] = "adapter-failed"
-        emit["footnote"] = render_footnote(["adapter-failed"], args.lang)
-        log_line(analysis_dir, f"tier5 adapter output not a usable graph: {e}")
+        # Exit-0 contract: unreadable/malformed analyzer output degrades to the
+        # same analyzer-failed skip as a crashed analyzer — never a traceback.
+        emit["reason"] = "analyzer-failed"
+        emit["footnote"] = render_footnote(["analyzer-failed"], args.lang)
+        log_line(analysis_dir, f"tier3 analyzer output not a usable graph: {e}")
         print(json.dumps(emit, ensure_ascii=False))
         return 0
     emit["status"], emit["tiers"]["json"] = "ok", True
     emit["artifacts"]["structure_json"] = str(structure_json)
-    if degraded:
-        reasons.append("degraded-noclasspath")
+    structure = counts.get("structure") or {}
+    if all(isinstance(v, int) for v in structure.values()):
+        emit["structure_summary"] = render_structure_summary(structure, args.lang)
 
     vg_path = analysis_dir / "structure.vg"
     loader_info = None

@@ -5,6 +5,14 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+- **Perception v2 engine (uv + Python + tree-sitter)** — deep structural analysis no longer requires a JDK/Gradle on the runtime path; the analyzer ships as a uv project (`perception/analyzer/`)
+  - **Config migration**: `structure_build_execution` is REMOVED (unknown keys in existing `~/.scv/config.json` are ignored — no action needed); no build ever executes inside the analyzed repository anymore, so `local` and `remote` sources are analyzed identically
+  - New config key `structure_extensions` (default `["springboot"]`): language extensions to enable; an empty list runs the language-agnostic structure layer only (structure-mode summary reports types/methods/call edges instead of components/edges); unknown values are warned into `perception.log` and dropped
+  - Degradation footnotes: `uv-missing` replaces `jdk-missing` (Python 3.11+ runtime wording); `analyzer-failed` replaces `adapter-build-failed`/`adapter-failed`/`degraded-noclasspath`
+
 ## [v0.10.0] - 2026-10-14
 
 ### Added

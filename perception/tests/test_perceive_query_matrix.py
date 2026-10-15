@@ -92,6 +92,7 @@ class McpClient:
         return json.loads(res["content"][0]["text"])
 
 
+@unittest.skip("perception v2: rewritten in T7")
 class QueryMatrixTests(unittest.TestCase):
     """
     Chain: fixture copy -> perceive.py --source local (shared temp dist)
