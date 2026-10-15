@@ -13,6 +13,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - New config key `structure_extensions` (default `["springboot"]`): language extensions to enable; an empty list runs the language-agnostic structure layer only (structure-mode summary reports types/methods/call edges instead of components/edges); unknown values are warned into `perception.log` and dropped
   - Degradation footnotes: `uv-missing` replaces `jdk-missing` (Python 3.11+ runtime wording); `analyzer-failed` replaces `adapter-build-failed`/`adapter-failed`/`degraded-noclasspath`
 
+## [v0.11.0] - 2026-10-15
+
+### Changed
+- **Perception v2 engine — uv + Python + tree-sitter replaces the JVM default path** (design docs under `docs/superpowers/`, two-round subagent-audited spec + plan):
+  - **No JDK required on the default path**: the analysis tier now runs `uv` + Python 3.11+; JDK/Gradle footnotes retired (uv-missing/analyzer-failed replace them)
+  - **Language-agnostic structure layer**: File / Type / Method nodes with CONTAINS / CALLS / IMPLEMENTS / EXTENDS / REFERENCES edges, syntactic FQN resolution (package + imports + qualified forms), honest drop+count accounting for unresolvable endpoints
+  - **Language extension points**: `structure_extensions: ["springboot"]` config (default on) gates the Bean/INJECTS layer; unknown extensions warn + are ignored; with no extension enabled the structure core runs standalone (marker-file Java detection, structure-mode summary line)
+  - **Precision preserved**: the tree-sitter springboot extension reproduces the Spoon engine's outputs exactly on all 5 frozen fixtures (multiset ground truth; `make crosscheck` in `perception/` diffs both engines)
+  - Loader now grades dependency cycles from INJECTS edges only (CALLS mutual recursion no longer surfaces in the user cycle summary); installer ships the analyzer (uv project + lock) instead of adapter sources
+  - The Spoon adapter remains in-tree as a test-time cross-validation engine
+- `structure_build_execution` config key removed (obsolete — the default path executes no build tools; migration note above); `structure_extensions` added
+
+### Evaluation
+- Analyzer pytest 72 · perception suite 51 (zero skips, real-chain integration + full query matrix) · loader/graphmcp Go tests · Spoon adapter 5/5 · crosscheck 5/5 · acceptance matrix 10/10 (incl. no-JDK full chain to the MCP hint)
+
 ## [v0.10.0] - 2026-10-14
 
 ### Added
