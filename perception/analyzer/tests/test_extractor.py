@@ -1,8 +1,9 @@
-"""TDD spec for the tree-sitter structure extractor (perception v2, Task 1).
+"""TDD spec for the tree-sitter structure extractor (perception v2, Tasks 1-2).
 
 Covers spec 2026-10-14 §3 (source-root discovery) and §4 (nodes, edges, key
-schemes, FQN resolution, edge-drop rule) on small snippets plus one frozen
-fixture smoke (torture-app).
+schemes, FQN resolution, edge-drop rule, CALLS mapping rule, REFERENCES,
+static-import drops) on small snippets plus one frozen fixture smoke
+(torture-app).
 """
 
 import json
@@ -382,6 +383,134 @@ def test_extract_generic_supertype_arguments_erased(tmp_path):
     assert payload["meta"]["structure"]["dropped_edges"] == 0
 
 
+# ---- Task 2: CALLS + REFERENCES (spec §4) ----
+
+_CC = "fn:com.example.calls.CallsCases"
+
+
+def _calls_repo(tmp_path: Path) -> Path:
+    return build_repo(tmp_path, {
+        "src/main/java/com/example/calls/CallsCases.java": snippet("CallsCases.java"),
+        "src/main/java/com/example/calls/Tool.java": snippet("Tool.java"),
+        "src/main/java/com/example/calls/Worker.java": snippet("Worker.java"),
+        "src/main/java/com/example/calls/Job.java": snippet("Job.java"),
+        "src/main/java/com/example/calls/Plain.java": snippet("Plain.java"),
+    })
+
+
+def call_triples(payload: dict) -> set[tuple[str, str, str]]:
+    """(src, dst, kind) triples of CALLS edges (duplicate lines collapse)."""
+    return {(e["srcKey"], e["dstKey"], e["props"]["kind"])
+            for e in payload["edges"] if e["label"] == "CALLS"}
+
+
+def test_extract_enum_methods_are_declared(tmp_path):
+    """enum members live under enum_body_declarations — still Method nodes."""
+    repo = build_repo(tmp_path, {
+        "src/main/java/com/example/kinds/Kinds.java": snippet("Kinds.java"),
+    })
+    out, payload = run_extract(repo)
+    assert "fn:com.example.kinds.Color#rotate()" in keys(payload, "Method")
+
+
+def test_calls_direct_on_class_typed_receivers(tmp_path):
+    repo = _calls_repo(tmp_path)
+    out, payload = run_extract(repo)
+    got = call_triples(payload)
+    src = f"{_CC}#"
+    assert (f"{src}directViaField()", "fn:com.example.calls.Worker#run()", "direct") in got
+    # param receiver and local (declarator) receiver
+    assert (f"{src}viaParamAndLocal(Tool)", "fn:com.example.calls.Tool#use()", "direct") in got
+    # implicit this, explicit this, and this.<field> receivers
+    assert (f"{src}viaThis()", f"{_CC}#own()", "direct") in got
+    assert (f"{src}viaThis()", "fn:com.example.calls.Worker#run()", "direct") in got
+    # receiver written as a class name (static call) -> direct
+    assert (f"{src}viaClassName()", f"{_CC}#own()", "direct") in got
+    # unique overload by name+arity
+    assert (f"{src}uniqueOverload(Tool)", "fn:com.example.calls.Tool#go(int)", "direct") in got
+    # line prop is a real 1-based source line
+    e = next(e for e in payload["edges"]
+             if e["label"] == "CALLS" and e["dstKey"] == "fn:com.example.calls.Worker#run()"
+             and e["srcKey"] == f"{src}directViaField()")
+    assert isinstance(e["props"]["line"], int) and e["props"]["line"] > 0
+
+
+def test_calls_virtual_dispatch_on_interface_receivers(tmp_path):
+    repo = build_repo(tmp_path, {
+        "src/main/java/com/example/calls/CallsCases.java": snippet("CallsCases.java"),
+        "src/main/java/com/example/calls/Tool.java": snippet("Tool.java"),
+        "src/main/java/com/example/calls/Worker.java": snippet("Worker.java"),
+        "src/main/java/com/example/calls/Job.java": snippet("Job.java"),
+        "src/main/java/com/example/calls/Plain.java": snippet("Plain.java"),
+        "src/main/java/com/example/calls/RecordCalls.java": snippet("RecordCalls.java"),
+    })
+    out, payload = run_extract(repo)
+    got = call_triples(payload)
+    assert (f"{_CC}#virtualViaField()", "fn:com.example.calls.Job#run()",
+            "virtual-dispatch") in got
+    # record component receiver, interface-declared target
+    assert ("fn:com.example.calls.RecordCalls#drive()",
+            "fn:com.example.calls.Engine#start()", "virtual-dispatch") in got
+
+
+def test_calls_inherited_field_receiver(tmp_path):
+    repo = build_repo(tmp_path, {
+        "src/main/java/com/example/calls/InheritCalls.java": snippet("InheritCalls.java"),
+        "src/main/java/com/example/calls/Worker.java": snippet("Worker.java"),
+    })
+    out, payload = run_extract(repo)
+    assert call_triples(payload) == {
+        ("fn:com.example.calls.InheritCalls#act()",
+         "fn:com.example.calls.Worker#run()", "direct"),
+    }
+
+
+def test_calls_overload_ambiguity_dropped(tmp_path):
+    repo = _calls_repo(tmp_path)
+    out, payload = run_extract(repo)
+    dsts = {e["dstKey"] for e in payload["edges"] if e["label"] == "CALLS"}
+    # no CALLS edge to either arity-2 overload (name+arity multi-match dropped)
+    assert "fn:com.example.calls.Tool#go(String,int)" not in dsts
+    assert "fn:com.example.calls.Tool#go(int,String)" not in dsts
+
+
+def test_calls_static_import_usage_dropped(tmp_path):
+    repo = _calls_repo(tmp_path)
+    out, payload = run_extract(repo)
+    dsts = {e["dstKey"] for e in payload["edges"] if e["label"] == "CALLS"}
+    assert not any("requireNonNull" in d for d in dsts)
+    # neither unqualified member use nor Objects.<member> produced an edge
+    assert payload["meta"]["structure"]["unresolved_refs"] == 1  # only s.trim()
+
+
+def test_calls_and_references_counters(tmp_path):
+    """Exact accounting on the CallsCases repo:
+    call_edges = 9, dropped = 6 (1 ambiguous + 2 static-import + 1 no-such-method
+    + new String + (String) cast), unresolved_refs = 1 (String receiver)."""
+    repo = _calls_repo(tmp_path)
+    out, payload = run_extract(repo)
+    st = payload["meta"]["structure"]
+    assert st["call_edges"] == 9
+    assert st["dropped_edges"] == 6
+    assert st["unresolved_refs"] == 1
+
+
+def test_references_from_new_and_cast(tmp_path):
+    repo = _calls_repo(tmp_path)
+    out, payload = run_extract(repo)
+    refs = {(e["srcKey"], e["dstKey"]) for e in payload["edges"]
+            if e["label"] == "REFERENCES"}
+    src = f"{_CC}#references()"
+    assert refs == {
+        (src, "type:com.example.calls.Tool"),
+        (src, "type:com.example.calls.Plain"),
+        (f"{_CC}#viaParamAndLocal(Tool)", "type:com.example.calls.Tool"),
+    }
+    e = next(e for e in payload["edges"] if e["label"] == "REFERENCES"
+             and e["dstKey"] == "type:com.example.calls.Tool")
+    assert isinstance(e["props"]["line"], int) and e["props"]["line"] > 0
+
+
 # ---- frozen fixture smoke (spec §8.3 structure bounds) ----
 
 @pytest.fixture(scope="module")
@@ -420,3 +549,24 @@ def test_torture_app_smoke_structure_edges(torture_payload):
     node_keys = {n["key"] for n in torture_payload["nodes"]}
     for e in torture_payload["edges"]:
         assert e["srcKey"] in node_keys and e["dstKey"] in node_keys
+
+
+def test_torture_app_smoke_call_edges(torture_payload):
+    """CALLS land in the spec §8.3 window (in-source resolution only); the
+    known virtual-dispatch edge resolves through the interface receiver."""
+    st = torture_payload["meta"]["structure"]
+    assert 10 <= st["call_edges"] <= 40
+    # interface-typed receiver -> virtual-dispatch to the interface method key
+    calls = [e for e in torture_payload["edges"] if e["label"] == "CALLS"]
+    by_src_dst = {(e["srcKey"], e["dstKey"]): e["props"] for e in calls}
+    greet = ("fn:com.acme.core.GreetingServiceImpl#greet(String)",
+             "fn:com.acme.core.GreetingRepository#loadTemplate()")
+    assert greet in by_src_dst
+    assert by_src_dst[greet]["kind"] == "virtual-dispatch"
+    # inherited field receiver (audit lives on AbstractAuditedService) -> direct
+    audit = ("fn:com.acme.core.GreetingServiceImpl#greet(String)",
+             "fn:com.acme.core.GreetingAudit#audit(String)")
+    assert audit in by_src_dst
+    assert by_src_dst[audit]["kind"] == "direct"
+    # out-of-source receivers are counted honestly, never dangled
+    assert st["unresolved_refs"] > 0

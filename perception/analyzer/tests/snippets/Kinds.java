@@ -13,7 +13,12 @@ record Point(int x, int y) {
 }
 
 enum Color {
-    RED, GREEN
+    RED, GREEN;
+
+    // enum members live under enum_body_declarations, one level below
+    // enum_body's direct children — they must still be declared methods
+    void rotate() {
+    }
 }
 
 @interface Marker {
