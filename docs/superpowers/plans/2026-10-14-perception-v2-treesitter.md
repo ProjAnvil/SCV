@@ -28,7 +28,7 @@
 - Consumes: spec §3 (source-root discovery), §4 (nodes/edges/keys/FQN rules)
 
 **Interfaces (produces, exact):**
-- CLI `analyzer.py <repo_dir> <out_json>` → writes Vectra-batch JSON `{"nodes":[...],"edges":[...],"unresolved":0,"meta":{...}}` (meta per spec §6 with `extensions: []`), exit 0 on success, non-zero + stderr on usage/IO errors.
+- CLI `analyzer.py <repo_dir> <out_json> [--extensions springboot]` (default: none) → writes Vectra-batch JSON `{"nodes":[...],"edges":[...],"unresolved":0,"meta":{...}}` (meta per spec §6 with `extensions: []`), exit 0 on success, non-zero + stderr on usage/IO errors. **This flag is THE extension-enabling interface** — T3/T4/T5/T7 all reference it verbatim.
 - `structure/model.py`: `Graph_out` builder with `add_node(key,label,props)`, `add_edge(src,dst,label,props)` (drop+count when endpoint missing), `add_call(...)`, `meta` dict, `to_json()`.
 - `structure/java_extractor.py`: `extract(repo: Path, out: Graph_out) -> None`; exports `discover_source_roots(repo)`, `parse_java_file(path)`, `fqn_index(files) -> {simple_name: fqn}` helpers.
 
@@ -36,7 +36,7 @@
 - [ ] **Step 2: failing extractor tests (TDD)** — snippets covering: package+import FQN (single + wildcard + same-package), nested class `$`, record/enum/interface/annotation kinds, method key normalization (generics erased, varargs/array `[]`, overload collision counter), CONTAINS file→type, IMPLEMENTS/EXTENDS with both endpoints in-source, edge DROPPED when interface comes from an unresolvable import (counted), source-root discovery on a multi-module tree incl. `build/`/`src/test/` exclusions.
 - [ ] **Step 3: implement** model + java_extractor per spec §4 (tree-sitter queries: package_declaration, import_declaration, class/interface/record/enum/annotation_declaration, method_declaration, constructor_declaration, superclasses/super_interfaces). FQN resolution: explicit imports → wildcard vs known simple names → same package; unresolved → skipped + `unresolved_refs`.
 - [ ] **Step 4: green + fixture smoke** — `uv run pytest` green; `uv run python analyzer.py <torture-app fixture copy> /tmp/t.json` prints meta: files=33, types ≥30, methods ≥80; `jq '.meta'`-style check in the test.
-- [ ] **Step 5: spike gate (spec §8.1)** — pipe `/tmp/t.json` through the loader (`go run` from perception/loader) to `/tmp/t.vg` and run one scv-graph-mcp/graphmcp-store Cypher (`MATCH (t:Type)-[:IMPLEMENTS]->(i {key:'type:com.acme.core.GreetingService'}) RETURN t.key` → `type:com.acme.core.GreetingServiceImpl`); record output in the report. Fix fallout if any.
+- [ ] **Step 5: spike gate (spec §8.1)** — pipe `/tmp/t.json` through the loader (`go run` from perception/loader) to `/tmp/t.vg` and run one graphmcp-store Cypher (reuse `tests/test_perceive_query_matrix.McpClient` JSON-RPC pattern against a temp `<dir>/<repo>/structure.vg` layout) (`MATCH (t:Type)-[:IMPLEMENTS]->(i {key:'type:com.acme.core.GreetingService'}) RETURN t.key` → `type:com.acme.core.GreetingServiceImpl`); record output in the report. Fix fallout if any.
 - [ ] **Step 6: commit** `feat: perception v2 analyzer skeleton — tree-sitter structure layer + spike gate`.
 
 ### Task 2: CALLS + REFERENCES edges
@@ -45,7 +45,7 @@
 **Consumes:** spec §4 CALLS mapping rule (receiver declared type FQN + name + arity; multi-match → drop+count), REFERENCES, static-import drop rule, dispatch kind.
 - [ ] Failing tests: method-invocation `foo.bar()` where `foo`'s declared type is a local/param/field with in-source FQN → CALLS `direct`; invocation on an interface-typed receiver → `virtual-dispatch` to the interface method key; arity/overload ambiguity → dropped+counted; `new Foo(...)` inside a method → REFERENCES; static-import usage dropped+counted.
 - [ ] Implement (scope analysis: params, locals from declarators, fields of owner type chain, `this.` implied receiver).
-- [ ] Fixture smoke: torture-app `call_edges` lands in 10–40; spot-check 3 known edges (e.g. `GreetingServiceImpl#greet` CALLS something in `JpaGreetingRepository`).
+- [ ] Fixture smoke: torture-app `call_edges` lands in 10–40; spot-check known edges incl. a virtual-dispatch one (`GreetingServiceImpl#greet` CALLS `fn:com.acme.core.GreetingRepository#loadTemplate()` — interface receiver, per spec §4).
 - [ ] Commit `feat: CALLS/REFERENCES with syntactic receiver resolution`.
 
 ### Task 3: springboot extension (beans + INJECTS)
@@ -53,7 +53,7 @@
 **Files:** create `extensions/registry.py`, `extensions/springboot.py`; extend tests (`test_springboot.py` + snippets mirroring the trickiest fixture cases standalone).
 **Consumes:** spec §5 in full (name table verbatim, meta-annotation walk in-source first, @Bean-produced suppression, qualifier/primary/by-name/list-unwrap, @EnableConfigurationProperties `.class` matching, multi-ctor selection, Lombok, conditions wording, java.*-via-import).
 - [ ] registry: reads enabled list; unknown → warn+ignore; calls `springboot.enrich(structure, out)`.
-- [ ] Failing tests per §5 bullet (one snippet per rule — reuse fixture classes copied into snippets): two-upper naming, @MyRestController in-source meta chain, @SpringBootApplication table chain, @Bean param + suppression, @Qualifier, @Primary collapse, byName, List unwrap, Optional unwrap, inherited @Autowired, multi-ctor @Autowired, @Value skip, conditions string, @EnableConfigurationProperties record.
+- [ ] Failing tests per §5 bullet (one snippet per rule — reuse fixture classes copied into snippets): two-upper naming, @MyRestController in-source meta chain, @SpringBootApplication table chain, @Bean param + suppression (incl. STATIC @Bean), @Qualifier, @Primary collapse, byName, List/Set/Collection unwrap (all three), Optional unwrap, inherited @Autowired, setter injection, multi-ctor @Autowired, @Value skip, conditions string, @EnableConfigurationProperties record, FQ-inline annotation form (`@org.springframework.stereotype.Component`).
 - [ ] Implement; `analyzer.py` wires extension output into nodes/edges + meta (beans/inject_edges/ambiguous counts, top-level `unresolved`).
 - [ ] Commit `feat: springboot language extension — bean graph on tree-sitter`.
 
@@ -61,8 +61,9 @@
 
 **Files:** create `analyzer/tests/test_fixtures.py` (+ tiny non-Spring java fixture dir under `analyzer/tests/fixtures/plain-java/`).
 **Consumes:** spec §5 multiset definition, frozen fixture counts.
-- [ ] Expected multisets embedded as literals (12/8, 30/24 with 4 amb + cycle pair, 15/10 with 4 amb, 12/6, 6/4) with per-edge tuples (src,dst,via,qualifier,wraps,ambiguous) and bean (key,stereotype,conditions) tuples — hand-derived from the existing Spoon outputs (run the old engine once to dump them, paste as literals).
-- [ ] Assertions: multiset equality per fixture; structure meta bounds (torture: files=33, call_edges 10–40, key_collisions reported); plain-java fixture → structure-mode only (no Bean label) and detect passes via marker-file rule.
+- [ ] Derive the expected multisets REPRODUCIBLY from the Spoon engine (still in-tree): `cd perception/adapters/springboot && gradle installDist -q`, then per fixture `./build/install/springboot-probe/bin/springboot-probe noclasspath <fixture-copy> /tmp/v1-<name>.json`, then project each dump with the canonical snippet below and paste the tuples as test literals (12/8, 30/24 with 4 amb + cycle pair, 15/10 with 4 amb, 12/6, 6/4):
+  `python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(sorted((n['key'],n['props'].get('stereotype'),n['props'].get('conditions')) for n in d['nodes'])); print(sorted((e['srcKey'],e['dstKey'],e['props'].get('via'),e['props'].get('qualifier'),e['props'].get('wraps'),e['props'].get('ambiguous',False)) for e in d['edges']))" /tmp/v1-<name>.json`
+- [ ] Assertions: multiset equality per fixture, run with `--extensions springboot`; structure meta bounds (torture: files=33, call_edges 10–40, key_collisions reported, dropped_edges > 0); plain-java fixture → analyzer-level only: no Bean label, no INJECTS edges, structure counts present (the marker-file DETECT assertion belongs to T5/T7 — perceive.py is still v1 here).
 - [ ] Green; commit `test: v2 fixture ground-truth suite (5 fixtures + plain-java)`.
 
 ### Task 5: perceive.py v2 + config + unit-test rewrite
@@ -71,7 +72,10 @@
 **Consumes:** spec §6 counts rules, §7 runtime table + footnote texts + dangling table.
 - [ ] Delete ensure_dist/adapter_source_hash/resolve_mode/cp-init dependency/MANIFEST run; add `probe_uv()` (uv on PATH + `uv run --project analyzer python -c pass` probe), `run_analyzer(repo, out, analysis_dir)` (timeout, stderr tail → perception.log), extension gating from config (`structure_extensions`, default ["springboot"]); detect unchanged except empty-extension marker-only path; footnotes FOOTNOTES updated to the v2 set verbatim (uv-missing runtime-worded, analyzer-failed reworded); counts label-filtered (Bean/INJECTS) + structure sub-counts + structure-mode summary wording en/zh constants; mcp tiers unchanged.
 - [ ] config.example.json: + `structure_extensions: ["springboot"]`, − `structure_build_execution`.
-- [ ] Rewrite unit tests to the v2 tier set (detect incl. empty-extension marker path, uv probe parsing, footnote texts, cleanup, counts filtering via a fake analyzer JSON).
+- [ ] `run_analyzer` contract: honors `SCV_PERCEPTION_ANALYZER` env override (path to a substitute analyzer executable — used by tests with a fake); logs a duration line + non-fatal stderr tail to perception.log on EVERY run; extension list validated by perceive.py itself (unknown value → warning into perception.log + dropped).
+- [ ] Rewrite unit tests to the v2 tier set (detect incl. empty-extension marker path, uv probe parsing, footnote texts, cleanup, counts filtering via a fake analyzer JSON, `analyzer-failed` path via a failing fake under SCV_PERCEPTION_ANALYZER → footnote + exit 0, counts.structure = {files, types, methods, call_edges}).
+- [ ] SAME COMMIT: quarantine the now-obsolete v1 integration + query-matrix tests (module-level `unittest.skip("perception v2: rewritten in T7")`) so the suite stays green; T7 rewrites them.
+- [ ] CHANGELOG.md: unreleased section gains the `structure_build_execution` removal + `structure_extensions` addition migration note.
 - [ ] Green; commit `feat: perceive.py v2 — uv analyzer tier, extension gating, v2 footnotes`.
 
 ### Task 6: loader INJECTS filter + graphmcp docs + installer
@@ -79,13 +83,13 @@
 **Files:** modify `perception/loader/main.go` (+ test), `perception/graphmcp/main.go` (description text only), `install.sh`, `perception/README.md`, `perception/DEVELOPERS.md`.
 - [ ] Loader: grade cycles from INJECTS edges only (`c.Edges` filtered by edge label before via-inspection; a cycle whose members connect via CALLS only is still reported in cycles[] but graded from INJECTS edges — per spec §7 table; add a go test: mixed CALLS+INJECTS cycle grades from INJECTS).
 - [ ] graphmcp cypher tool description: mention Type/Method nodes and CALLS/IMPLEMENTS edges.
-- [ ] install.sh Step 4.5: whitelist = perceive.py, README.md, loader/, graphmcp/, analyzer/ (incl. uv.lock, excl. tests), MANIFEST detect-only copy; adapter sources/build files NO longer shipped.
+- [ ] install.sh Step 4.5: whitelist = perceive.py, README.md, loader/, graphmcp/, analyzer/ (incl. uv.lock; excl. tests/ and .venv/ — analyzer/.venv gitignored), MANIFEST detect-only copy; adapter sources/build files NO longer shipped.
 - [ ] README/DEVELOPERS rewritten for v2 (no-JDK path, extensions config, crosscheck).
 - [ ] go tests + `bash -n` + vocabulary grep green; commit `feat: loader INJECTS cycle filter, installer ships analyzer, v2 docs`.
 
 ### Task 7: integration rewrites + full acceptance
 
-**Files:** rewrite `perception/tests/test_perceive_integration.py`; `Makefile` (+ `crosscheck` target running both engines, multiset diff via a small python script `tools/crosscheck.py`); run the acceptance matrix.
+**Files:** rewrite `perception/tests/test_perceive_integration.py`; `perception/Makefile` (NEW; `crosscheck` target) + `perception/tools/crosscheck.py` (runs BOTH engines over the 5 fixtures — Spoon via the Task-4 command chain, tree-sitter via `uv run analyzer.py --extensions springboot` — projects both outputs through the SAME tuple projection, diffs, exits non-zero on mismatch); run the acceptance matrix.
 - [ ] Integration tests v2: local torture run via temp uv project env `SCV_PERCEPTION_ANALYZER` override (defaults to repo path) — status ok, counts 30/24 + structure counts, vg tier, remote == local (no build execution anywhere), not-framework silent, extension-off run (temp config) → no beans, uv-missing path (PATH stripped) → footnote + exit 0.
 - [ ] Query matrix: unchanged file, must pass unmodified.
 - [ ] No-JDK run (PATH without java) → full tier chain to mcp hint.
