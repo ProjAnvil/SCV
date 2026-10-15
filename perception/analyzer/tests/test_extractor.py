@@ -362,6 +362,26 @@ def test_analyzer_cli_missing_args_exit_nonzero(capsys):
     assert capsys.readouterr().err.strip()
 
 
+# ---- folded T1-review fix: generic type arguments erased in supers ----
+
+def test_extract_generic_supertype_arguments_erased(tmp_path):
+    """implements Sink<String> / extends Box<Base> must resolve the raw simple
+    name in-source instead of dropping the edge (T1 review fix)."""
+    repo = build_repo(tmp_path, {
+        "src/main/java/com/example/calls/GenericSupers.java": snippet("GenericSupers.java"),
+    })
+    out, payload = run_extract(repo)
+    assert edge_set(payload, "EXTENDS") == {
+        ("type:com.example.calls.GenericSupers", "type:com.example.calls.Box"),
+        ("type:com.example.calls.Chained", "type:com.example.calls.Sink"),
+    }
+    assert edge_set(payload, "IMPLEMENTS") == {
+        ("type:com.example.calls.GenericSupers", "type:com.example.calls.Sink"),
+        ("type:com.example.calls.GenericSupers", "type:com.example.calls.Plain"),
+    }
+    assert payload["meta"]["structure"]["dropped_edges"] == 0
+
+
 # ---- frozen fixture smoke (spec §8.3 structure bounds) ----
 
 @pytest.fixture(scope="module")

@@ -153,6 +153,19 @@ def norm_type(node) -> str:
     return _text(node)  # type_identifier, void_type, integral_type, boolean_type...
 
 
+def declared_type_name(node) -> str:
+    """Declared-type text for name RESOLUTION (supertypes, receivers): type
+    arguments erased like :func:`norm_type`, but qualification preserved —
+    ``a.b.Bar<X>`` stays ``a.b.Bar`` so ``resolve_type_name`` can take the
+    fully-qualified form as written."""
+    if node is None:
+        return ""
+    if node.type == "generic_type":
+        base = node.children[0] if node.children else node
+        return _text(base)
+    return _text(node)
+
+
 def _norm_param(param_node) -> str:
     if param_node.type == "spread_parameter":  # varargs -> T[]
         for child in param_node.children:
@@ -204,14 +217,15 @@ def _method(decl) -> MethodDecl:
 
 
 def _type_list_texts(node) -> list[str]:
-    """Names as written from a super_interfaces / extends_interfaces clause."""
+    """Names from a super_interfaces / extends_interfaces clause: type
+    arguments erased so the simple name resolves (T1 review fix)."""
     if node is None:
         return []
     for child in node.children:
         if child.type == "type_list":
             node = child
             break
-    return [_text(c) for c in node.children if c.type in (
+    return [declared_type_name(c) for c in node.children if c.type in (
         "type_identifier", "scoped_type_identifier", "generic_type")]
 
 
@@ -227,7 +241,7 @@ def _parse_type(decl) -> TypeDecl:
     if sup is not None:
         for child in sup.children:
             if child.type in ("type_identifier", "scoped_type_identifier", "generic_type"):
-                td.extends_names.append(_text(child))
+                td.extends_names.append(declared_type_name(child))
                 break
     iface_field = decl.child_by_field_name("interfaces")
     if iface_field is not None:
