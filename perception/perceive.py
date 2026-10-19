@@ -294,10 +294,30 @@ def render_structure_summary(structure: dict, lang: str = "zh") -> str:
         call_edges=structure.get("call_edges"))
 
 
+def _go_binary_is_stale(binary: Path, source_dir: Path) -> bool:
+    """True when any Go source is newer than the built binary.
+
+    The dist binaries are cached across runs, so a user who installed an earlier
+    SCV keeps running the loader they first built. That is not a cosmetic issue:
+    the pre-10-15 loader reported every SCC as a tolerable cycle, including
+    CALLS-only mutual recursion and single-node self loops, so an upgraded
+    checkout silently disagreed with its own source.
+    """
+    if not binary.exists():
+        return True
+    built = binary.stat().st_mtime
+    try:
+        return any(p.stat().st_mtime > built
+                   for p in source_dir.glob("*.go")) or \
+            (source_dir / "go.mod").stat().st_mtime > built
+    except OSError:
+        return False
+
+
 def run_loader(loader_dir: Path, json_path: Path, vg_path: Path, analysis_dir: Path):
     binary = DIST_ROOT / "loader" / "perception-loader"
     try:
-        if not binary.exists():
+        if _go_binary_is_stale(binary, loader_dir):
             binary.parent.mkdir(parents=True, exist_ok=True)
             subprocess.run(["go", "build", "-o", str(binary), "."], cwd=loader_dir,
                            capture_output=True, text=True, timeout=TIER_TIMEOUT, check=True)
@@ -325,7 +345,7 @@ def build_graphmcp(analysis_dir: Path) -> Path | None:
     failure here never affects the JSON/vg tiers — it only drops the query
     hint back to the per-snapshot vectra-mcp path."""
     binary = DIST_ROOT / "graphmcp" / "scv-graph-mcp"
-    if binary.exists():
+    if not _go_binary_is_stale(binary, PERCEPTION_ROOT / "graphmcp"):
         return binary
     try:
         binary.parent.mkdir(parents=True, exist_ok=True)
@@ -353,7 +373,11 @@ def main() -> int:
             "counts": None, "artifacts": {"structure_json": None, "structure_vg": None},
             "structure_summary": None, "mcp_add": None, "footnote": ""}
 
-    cfg_path = Path.home() / ".scv/config.json"
+    # SCV_PERCEPTION_CONFIG points at an alternate config file. It exists so the
+    # fixture suite can exercise structure mode (structure_extensions: []) without
+    # rewriting the user's real ~/.scv/config.json. Unset, behaviour is unchanged.
+    cfg_path = Path(os.environ.get("SCV_PERCEPTION_CONFIG")
+                    or Path.home() / ".scv/config.json")
     try:
         cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
