@@ -1,0 +1,12 @@
+server:
+  port: 8080
+
+acme:
+  gateway-enabled: true
+  worker-threads: 4
+  mail:
+    sender: orders@acme.test
+    timeout-ms: 2000
+  gateway:
+    base-url: https://gateway.acme.test
+    retries: 2

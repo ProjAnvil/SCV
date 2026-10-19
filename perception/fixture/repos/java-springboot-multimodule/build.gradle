@@ -1,0 +1,25 @@
+subprojects {
+    apply plugin: 'java'
+    repositories { mavenCentral() }
+    java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }
+}
+
+project(':app') {
+    dependencies {
+        implementation project(':core')
+        implementation 'org.springframework.boot:spring-boot-starter-web:3.2.5'
+    }
+}
+
+project(':core') {
+    dependencies {
+        implementation project(':infra')
+        implementation 'org.springframework.boot:spring-boot-starter-web:3.2.5'
+    }
+}
+
+project(':infra') {
+    dependencies {
+        implementation 'org.springframework.boot:spring-boot-starter-web:3.2.5'
+    }
+}
