@@ -13,6 +13,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - New config key `structure_extensions` (default `["springboot"]`): language extensions to enable; an empty list runs the language-agnostic structure layer only (structure-mode summary reports types/methods/call edges instead of components/edges); unknown values are warned into `perception.log` and dropped
   - Degradation footnotes: `uv-missing` replaces `jdk-missing` (Python 3.11+ runtime wording); `analyzer-failed` replaces `adapter-build-failed`/`adapter-failed`/`degraded-noclasspath`
 
+## [v0.11.1] - 2026-10-19
+
+### Fixed
+- **Perception no longer reuses a stale Go binary — phantom dependency cycles in the user report.** `run_loader` and `build_graphmcp` built their binaries only when the file was missing, so an installation that predated a loader change kept running the loader it first built. A 2026-10-13 loader predated the 2026-10-15 INJECTS cycle filter and graded every SCC as `tolerated`, including CALLS-only mutual recursion and single-node self loops — so an upgraded checkout silently disagreed with its own source. Both tiers now rebuild when any Go source or `go.mod` is newer than the binary.
+- Cycle counts and cycle grades now reflect the current loader on every machine, not whatever version happened to be cached in `~/.scv/perception/dist/`.
+
+### Added
+- `SCV_PERCEPTION_CONFIG` — optional env var pointing `perceive.py` at an alternate config file. Unset, it reads `~/.scv/config.json` exactly as before. It exists so the fixture suite can exercise structure mode without rewriting the user's config.
+- **Perception fixture harness** (`perception/fixture/`) — multi-language source trees that exercise `perceive.py` the way `scv run` Step 5.5 does, wired into `make test` as its last step:
+  - `java-springboot-monolith` — Java 21 / Spring Boot 3: every injection style (constructor, field, setter, `@Bean` method), `@Qualifier` / `@Primary` / collection / `Optional` / `@Lazy` / `@Value` cases, conditional assembly, and two cycles graded on purpose — one fatal (constructor) and one tolerated (field)
+  - `java-springboot-multimodule` — Gradle multi-module with the boot class in a submodule and injection crossing module boundaries
+  - `java-plain-core` — plain Java 21 with no Spring, which is analysed only in structure mode
+  - `python-complex`, `golang-complex` — assert the Java-only skip path stays clean (exit 0, `status: skipped`, no structure graph)
+- `make test EXTENSIONS=` runs the same suite in structure-only mode. Bean-level assertions are skipped there because that mode produces no beans by design.
+
+### Known limitations
+- Wildcard (on-demand) imports hide a class's stereotype: a `@RestController` reached through `import org.springframework.web.bind.annotation.*;` is extracted into the structure layer but never becomes a bean. Real Spring codebases use this form often. Frozen by `StatusController` in the monolith fixture — the check asserts it is *not* a bean, so closing the gap requires inverting that assertion.
+
+### Evaluation
+- `make test` green: analyzer pytest 72 · perception suite 51 · loader and graphmcp Go tests · fixture check OK in both extension modes
+- Monolith fixture: 19 beans / 23 INJECTS edges, fatal 1, tolerated 1 — matching the hand-built ground truth
+- Multi-module fixture: 5 beans / 2 edges, both cross-module edges present
+
 ## [v0.11.0] - 2026-10-15
 
 ### Changed
