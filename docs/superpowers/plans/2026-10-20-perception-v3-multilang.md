@@ -1,5 +1,13 @@
 # Perception v3 (multi-language tree-sitter) Implementation Plan
 
+> **STATUS: COMPLETE — all 9 tasks landed on `feat/perception-v3-multilang`**
+> T1 `22344b7` · T2 `3153974` · T3 `3ca729e` · T4 `eca4a7f` · T5 `177b4e1`
+> (spec counting addendum `6913286`) · T6 `9d64c56` · T7 `a05669a` (§9(b)
+> downgraded — lang snapshot queries need no index) · T8 `5b63462` ·
+> T9 `29b3ded`. Final baseline: analyzer pytest 193 green · perception
+> unittest 70 green · loader/graphmcp go tests green · fixture check OK in
+> both extension modes · acceptance matrix 10/10.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Extend the v2 tree-sitter structure layer from Java-only to six languages (java, python, javascript, typescript, go, rust), so every analyzed repo leaves `~/.scv/analysis/{repo}/structure.json` + `structure.vg` — nodes carry `lang`, a new `IMPORTS` (File→File) edge, Go gains syntactic method-set `IMPLEMENTS` — behind a `structure_languages` config gate (default: all on), with the existing loader/graphmcp chain unchanged apart from a `lang` property index.
