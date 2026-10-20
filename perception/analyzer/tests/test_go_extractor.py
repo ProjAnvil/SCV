@@ -397,6 +397,29 @@ def test_imports_blank_import_no_edge_no_count(graph):
     assert st["dropped_edges"] == 1   # only Guard's external embed
 
 
+def test_imports_identifier_use_miss_counted(tmp_path):
+    """In-repo import whose package declares none of the used identifiers
+    -> no edge for those uses + unresolved_refs +1 per missed identifier
+    (rev3 ruling); identifiers the package does declare still earn edges."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "go.mod").write_text("module example.com/miss\n", encoding="utf-8")
+    (repo / "util").mkdir()
+    (repo / "util" / "util.go").write_text(
+        "package util\n\nfunc Real() int { return 1 }\n", encoding="utf-8")
+    (repo / "main.go").write_text(
+        "package main\n\nimport \"example.com/miss/util\"\n\n"
+        "var _ = util.Phantom\n\nfunc main() {\n\t_ = util.Real()\n"
+        "\t_ = util.Ghost\n}\n", encoding="utf-8")
+    out = Graph_out(extensions=[])
+    go_extractor.extract(repo, out)
+    graph = out.to_json()
+    st = graph["meta"]["structure"]
+    assert st["unresolved_refs"] == 2     # Ghost + Phantom: in-repo misses
+    imports = {(s, d) for s, d, _ in _edges(graph, "IMPORTS")}
+    assert imports == {("file:main.go", "file:util/util.go")}
+
+
 # ---- meta (spec §8) ----
 
 def test_meta_languages_and_by_lang(graph):

@@ -731,6 +731,10 @@ def _bind(repo: Path, parsed: list[GoFile], out: Graph_out) -> None:
     out.go_unverifiable_satisfaction = unverifiable
 
     # ---- IMPORTS: identifier-use matching (spec §5 go column) ----
+    # rev3 counting ruling: an identifier used through an in-repo import
+    # that NO file of that package declares is a name-resolution failure
+    # inside the repo -> unresolved_refs +1 per missed identifier (no edge
+    # for that use — there is no declaring file to land on).
     for pf in parsed:
         fk = f"file:{pf.rel}"
         seen: set[str] = set()
@@ -743,7 +747,13 @@ def _bind(repo: Path, parsed: list[GoFile], out: Graph_out) -> None:
             used = pf.uses.get(imp.local, set())
             if not used:
                 continue  # no identifier use -> no edge, not counted
-            for tf in files_by_pkg.get(pkg, []):
+            pkg_files = files_by_pkg.get(pkg, [])
+            declared_all: set[str] = set()
+            for tf in pkg_files:
+                declared_all |= tf.declared
+            for ident in sorted(used - declared_all):
+                out.unresolved_refs += 1  # in-repo identifier-use miss
+            for tf in pkg_files:
                 if tf.rel == pf.rel or not (used & tf.declared):
                     continue
                 tk = f"file:{tf.rel}"

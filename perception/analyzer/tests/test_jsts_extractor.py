@@ -269,6 +269,40 @@ def test_bare_import_dropped_and_counted(graph):
     assert graph["meta"]["structure"]["dropped_edges"] >= 2
 
 
+# ---- IMPORTS counting (spec §5 rev3 addendum) ----
+
+def test_import_unknown_name_counted_default_never(tmp_path):
+    """Relative specifier resolving to an in-repo file whose export table
+    lacks the imported name -> unresolved_refs +1 per name (rev3 ruling);
+    a default import never names an export-table entry -> never counted.
+    The file-level IMPORTS edges stay (the dependency is real)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "mod.ts").write_text(
+        "export class Klass {}\n"
+        "export function fn(): void {}\n", encoding="utf-8")
+    (repo / "a.ts").write_text(
+        "import { Klass, ghost } from \"./mod\";\n"
+        "export function ua(): void {\n  const k = new Klass();\n}\n",
+        encoding="utf-8")
+    (repo / "b.ts").write_text(
+        "import { phantom } from \"./mod\";\n", encoding="utf-8")
+    (repo / "d.ts").write_text(
+        "import def from \"./mod\";\n", encoding="utf-8")
+    out = Graph_out(extensions=[])
+    jsts_extractor.extract(repo, out)
+    graph = out.to_json()
+    st = graph["meta"]["structure"]
+    assert st["unresolved_refs"] == 2   # ghost + phantom; default import never
+    assert st["dropped_edges"] == 0
+    imports = {(s, d) for s, d, _ in _edges(graph, "IMPORTS")}
+    assert imports == {
+        ("file:a.ts", "file:mod.ts"),
+        ("file:b.ts", "file:mod.ts"),
+        ("file:d.ts", "file:mod.ts"),
+    }
+
+
 # ---- meta (spec §8) ----
 
 def test_meta_languages_and_by_lang(graph):

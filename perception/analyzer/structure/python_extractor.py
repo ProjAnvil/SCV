@@ -70,6 +70,7 @@ class PyImport:
     level: int                     # 0 absolute; N relative (dots)
     names: list[tuple[str, str]] = field(default_factory=list)
     # names: (imported simple name, local alias) — empty for plain `import x`
+    from_import: bool = False      # `from M import ...` (names are members)
 
 
 @dataclass
@@ -199,7 +200,10 @@ def _parse_file(path: Path, repo: Path) -> PyFile:
                 else:
                     module = text
             names: list[tuple[str, str]] = []
+            mod_id = mod_node.id if mod_node is not None else None
             for child in inner.children:
+                if child.id == mod_id:
+                    continue  # the module dotted_name is NOT an imported name
                 if child.type == "dotted_name":
                     names.append((_read(child, source).split(".")[-1],
                                   _read(child, source).split(".")[-1]))
@@ -208,7 +212,8 @@ def _parse_file(path: Path, repo: Path) -> PyFile:
                     al = child.child_by_field_name("alias")
                     names.append((_read(nm, source).split(".")[-1],
                                   _read(al, source)))
-            pf.imports.append(PyImport(module=module, level=level, names=names))
+            pf.imports.append(PyImport(module=module, level=level, names=names,
+                                       from_import=True))
         elif inner.type == "import_statement":
             for child in inner.children:
                 if child.type == "dotted_name":
@@ -317,6 +322,8 @@ def _bind(repo: Path, parsed: list[PyFile], out: Graph_out) -> None:
     for pf in parsed:
         bindings: dict[str, tuple] = {}
         for imp in pf.imports:
+            if not imp.from_import:
+                continue  # plain `import x` binds the module itself
             target = imp.module
             if imp.level:
                 target = _resolve_relative(imp.module, imp.level, pf)
@@ -331,7 +338,11 @@ def _bind(repo: Path, parsed: list[PyFile], out: Graph_out) -> None:
                     bindings[local] = ("cls", tc[simple])
         imports_of[pf.rel] = bindings
 
-    # IMPORTS edges
+    # IMPORTS edges + rev3 counting ruling: an in-repo from-import of a
+    # name the target module does not declare (function/class/submodule) is
+    # a name-resolution failure inside the repo -> unresolved_refs +1 per
+    # name. The module-level edge itself stays: the file dependency is real
+    # (the task's ruling summary counts, it does not retract edges).
     for pf in parsed:
         file_key = f"file:{pf.rel}"
         seen: set[str] = set()
@@ -343,6 +354,15 @@ def _bind(repo: Path, parsed: list[PyFile], out: Graph_out) -> None:
             if tgt_file and tgt_file != file_key and tgt_file not in seen:
                 if out.add_import(file_key, tgt_file):
                     seen.add(tgt_file)
+            if not imp.from_import:
+                continue  # `import x` / `import x as y`: module binding only
+            tf = mod_functions.get(target, {})
+            tc = mod_classes.get(target, {})
+            for simple, _alias in imp.names:
+                if (simple in tf or simple in tc
+                        or f"{target}.{simple}" in file_of_module):
+                    continue  # binds: member, or a submodule of the target
+                out.unresolved_refs += 1  # in-repo target, unknown name
 
     # base resolution + MRO closure
     def _resolve_base(pf: PyFile, base_text: str) -> str | None:

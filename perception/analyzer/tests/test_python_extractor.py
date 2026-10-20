@@ -165,6 +165,59 @@ def test_meta_import_edges_count(graph):
     assert graph["meta"]["structure"]["import_edges"] == 3
 
 
+# ---- IMPORTS counting (spec §5 rev3 addendum) ----
+
+def _write(tmp_path, files: dict[str, str]):
+    repo = tmp_path / "repo"
+    for rel, content in files.items():
+        p = repo / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content, encoding="utf-8")
+    return repo
+
+
+def test_from_import_unknown_name_counted(tmp_path):
+    """In-repo from-import of a name the target module does not declare ->
+    unresolved_refs +1 per name (rev3 ruling); the module-level IMPORTS edge
+    itself stays (the file dependency is real)."""
+    repo = _write(tmp_path, {
+        "mod/__init__.py": "",
+        "mod/lib.py": "def known():\n    return 1\n",
+        "partial.py": "from mod.lib import known, ghost\n",
+        "broken.py": "from mod.lib import phantom\n",
+    })
+    out = Graph_out(extensions=[])
+    python_extractor.extract(repo, out)
+    graph = out.to_json()
+    assert graph["meta"]["structure"]["unresolved_refs"] == 2
+    imports = {(s, d) for s, d, _ in _edges(graph, "IMPORTS")}
+    assert imports == {
+        ("file:partial.py", "file:mod/lib.py"),
+        ("file:broken.py", "file:mod/lib.py"),
+    }
+
+
+def test_plain_aliased_and_submodule_imports_never_counted(tmp_path):
+    """`import mod.lib as lb` names the module, not a member (no count);
+    `from mod import lib` binds a submodule (no count, edge to the package
+    file). Both keep their IMPORTS edges."""
+    repo = _write(tmp_path, {
+        "mod/__init__.py": "",
+        "mod/lib.py": "def known():\n    return 1\n",
+        "alias.py": "import mod.lib as lb\n",
+        "submod.py": "from mod import lib\n",
+    })
+    out = Graph_out(extensions=[])
+    python_extractor.extract(repo, out)
+    graph = out.to_json()
+    assert graph["meta"]["structure"]["unresolved_refs"] == 0
+    imports = {(s, d) for s, d, _ in _edges(graph, "IMPORTS")}
+    assert imports == {
+        ("file:alias.py", "file:mod/lib.py"),
+        ("file:submod.py", "file:mod/__init__.py"),
+    }
+
+
 def test_meta_aggregates_are_sums(graph):
     st = graph["meta"]["structure"]
     by = st["by_lang"]["python"]

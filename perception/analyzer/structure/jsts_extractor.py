@@ -18,13 +18,18 @@ Graphify-aligned two-pass design (spec §3.1):
   annotated-receiver CALLS (interface receiver → ``virtual-dispatch``), and
   REFERENCES from ``new`` expressions + type-identifier annotations.
 
-Honesty rules (v2 discipline): unresolvable callee/receiver →
-``unresolved_refs``; constructible-but-unreachable (bare npm specifier,
-re-export chain beyond one hop, unresolvable heritage) → ``dropped_edges``;
-builtin bare calls and builtin member receivers are filtered silently BEFORE
-counting (spec §3.1.3, language-local frozensets, never a shared table).
-``import type`` creates type bindings (REFERENCES / receivers) but never an
-IMPORTS edge.
+Honesty rules (v2 discipline + the 2026-10-20 rev3 IMPORTS counting
+ruling): unresolvable callee/receiver → ``unresolved_refs``; a relative
+specifier resolving to an in-repo file whose export table lacks the imported
+name → ``unresolved_refs`` (a name-resolution failure inside the repo; the
+module-level IMPORTS edge itself stays — the file dependency is real);
+constructible-but-unreachable (bare npm specifier, re-export chain beyond
+one hop, unresolvable heritage) → ``dropped_edges``; builtin bare calls and
+builtin member receivers are filtered silently BEFORE counting (spec
+§3.1.3, language-local frozensets, never a shared table). ``import type``
+creates type bindings (REFERENCES / receivers) but never an IMPORTS edge.
+Default imports (``import X from``) never name an export-table entry: bound
+opportunistically, never counted.
 
 Grammar node-name pitfalls (probed; reference for the Rust/Go extractors):
 
@@ -225,6 +230,10 @@ class JsImport:
     names: list[tuple[str, str]] = field(default_factory=list)
     # names: (source-side name, local/exposed name)
     namespace: str | None = None  # `import * as ns` / `const ns = require()`
+    default_local: str | None = None  # `import X from` — the default import's
+    # local name; a default never names an export-table entry, so it is
+    # bound opportunistically and NEVER counted as unresolved (rev3 ruling
+    # applies to named imports).
 
 
 @dataclass
@@ -355,13 +364,13 @@ def _parse_file(path: Path, repo: Path) -> JsFile:
         type_only = any(c.type == "type" for c in stmt.children)
         names: list[tuple[str, str]] = []
         namespace = None
+        default_local = None
         for c in stmt.children:
             if c.type != "import_clause":
                 continue
             for d in c.children:
                 if d.type == "identifier":
-                    text = _read(d, source)
-                    names.append((text, text))  # default import
+                    default_local = _read(d, source)  # default import
                 elif d.type == "named_imports":
                     for es in d.children:
                         if es.type != "import_specifier":
@@ -379,7 +388,8 @@ def _parse_file(path: Path, repo: Path) -> JsFile:
                         namespace = _read(ids[0], source)
         pf.imports.append(JsImport(spec=spec, kind="import",
                                    type_only=type_only, names=names,
-                                   namespace=namespace))
+                                   namespace=namespace,
+                                   default_local=default_local))
 
     def _reexport(stmt, src_node) -> None:
         spec = _string_text(src_node, source)
@@ -597,6 +607,9 @@ def _bind(parsed: list[JsFile], out: Graph_out) -> None:
                             and (imported in other.reexports
                                  or other.wildcard_reexport)):
                         out.count_dropped_edge()  # chain beyond one hop
+                    else:
+                        # in-repo target whose export table lacks the name
+                        out.unresolved_refs += 1  # (rev3 counting ruling)
                 continue
             if imp.kind == "reexport_wildcard":
                 continue
@@ -612,8 +625,17 @@ def _bind(parsed: list[JsFile], out: Graph_out) -> None:
                         and (imported in other.reexports
                              or other.wildcard_reexport)):
                     out.count_dropped_edge()  # symbol beyond one hop (§12)
-                # else: const/unknown export — silently unbound (python
-                # precedent for unresolvable from-imports)
+                else:
+                    # in-repo file, name absent from its export table
+                    out.unresolved_refs += 1  # (rev3 counting ruling)
+            if imp.default_local is not None:
+                # default import: bound opportunistically, never counted
+                # (the default export's identity is not in the symbol table)
+                dl = imp.default_local
+                if dl in fns_of[tgt]:
+                    bindings[dl] = ("fn", fns_of[tgt][dl])
+                elif dl in types_of[tgt]:
+                    bindings[dl] = ("cls", types_of[tgt][dl])
             if imp.namespace:
                 bindings[imp.namespace] = ("ns", tgt)
         bindings_of[f.rel] = bindings

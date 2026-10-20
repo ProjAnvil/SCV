@@ -510,9 +510,18 @@ class _Index:
 
 # ---- resolution helpers shared by stages 3/4 ----
 
+# rev3 counting ruling sentinel: the path's head resolved in-repo (crate /
+# self / super / child module / in-repo crate name) but the full path names
+# nothing — a name-resolution failure INSIDE the repo, distinct from an
+# external crate (plain None). Callers that only need a bind treat it like
+# None; stage 3 additionally counts it in unresolved_refs.
+_UNRESOLVED = {"kind": "unresolved"}
+
+
 def _resolve_path(segs: tuple[str, ...], crate: str,
                   mod_path: tuple[str, ...], index: _Index) -> dict | None:
-    """Path segments -> {kind: module|type|fn|assoc, ...} or None."""
+    """Path segments -> {kind: module|type|fn|assoc, ...}, _UNRESOLVED for
+    an in-repo path that names nothing, or None for an external head."""
     if not segs:
         return None
     i, cur_crate, cur_mod = 0, crate, mod_path
@@ -524,7 +533,7 @@ def _resolve_path(segs: tuple[str, ...], crate: str,
     elif head == "super":
         while i < len(segs) and segs[i] == "super":
             if not cur_mod:
-                return None
+                return _UNRESOLVED
             cur_mod, i = cur_mod[:-1], i + 1
         if i >= len(segs):
             return {"kind": "module", "crate": cur_crate, "mod": cur_mod,
@@ -546,7 +555,7 @@ def _resolve_path(segs: tuple[str, ...], crate: str,
         if index.type_in(cur_crate, cur_mod, s) is not None:
             return {"kind": "assoc", "tkey": _tkey(cur_crate, cur_mod, s),
                     "names": tuple(segs[i + 1:])}
-        return None
+        return _UNRESOLVED
     if i >= len(segs):
         return {"kind": "module", "crate": cur_crate, "mod": cur_mod,
                 "file": index.file_of(cur_crate, cur_mod)}
@@ -562,7 +571,7 @@ def _resolve_path(segs: tuple[str, ...], crate: str,
     rec = index.fn_in(cur_crate, cur_mod, last)
     if rec is not None:
         return {"kind": "fn", "rec": rec, "file": rec["file"]}
-    return None
+    return _UNRESOLVED
 
 
 def _resolve_type_name(text: str, m: RustModule, index: _Index) -> str | None:
@@ -729,6 +738,11 @@ def _resolve_bindings(index: _Index, modules: list[RustModule],
             desc = _resolve_path(u.segments, m.crate, m.path, index)
             if desc is None:
                 continue  # external crate — no edge, no count
+            if desc["kind"] == "unresolved":
+                # in-repo path naming nothing (e.g. `use a::X` with X
+                # unknown): rev3 counting ruling — no edge + unresolved_refs
+                out.unresolved_refs += 1
+                continue
             m.bindings[u.local] = desc
             if desc["kind"] == "type":
                 out.add_edge(fk, desc["tkey"], "REFERENCES",

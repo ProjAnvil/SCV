@@ -280,6 +280,29 @@ def test_imports_external_crate_no_edge_no_count(graph):
     assert st["import_edges"] == 3
 
 
+def test_use_unknown_inrepo_item_counted(tmp_path):
+    """`use app::ghost;` — the head resolves in-repo but the item does not
+    exist -> unresolved_refs +1, no edge (rev3 ruling); `use std::fmt;`
+    stays external (no edge, no count)."""
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    (repo / "Cargo.toml").write_text(
+        "[package]\nname = \"app\"\n", encoding="utf-8")
+    (repo / "src").mkdir()
+    (repo / "src" / "lib.rs").write_text(
+        "pub fn real() -> i32 { 1 }\n", encoding="utf-8")
+    (repo / "src" / "main.rs").write_text(
+        "use app::real;\nuse app::ghost;\nuse std::fmt;\n\n"
+        "fn main() {\n    let _ = real();\n}\n", encoding="utf-8")
+    out = Graph_out(extensions=[])
+    rust_extractor.extract(repo, out)
+    graph = out.to_json()
+    st = graph["meta"]["structure"]
+    assert st["unresolved_refs"] == 1     # use app::ghost — in-repo miss
+    imports = {(s, d) for s, d, _ in _edges(graph, "IMPORTS")}
+    assert imports == {("file:src/main.rs", "file:src/lib.rs")}
+
+
 # ---- meta (spec §8) ----
 
 def test_meta_languages_and_by_lang(graph):
