@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.12.0] - 2026-10-20
+
 ### Added
 - **Perception v3 — six-language structure layer** — deep structural analysis now runs on **Java, Python, JavaScript, TypeScript, Go, and Rust** (previously Java-only; every non-Java repository skipped the tier with no structure graph). One structure graph per repository; nodes carry `lang`
   - Five new tree-sitter extractors (`structure/python_extractor.py`, `structure/jsts_extractor.py` — JS + TS in one module, `structure/go_extractor.py`, `structure/rust_extractor.py`, plus `structure/langs.py` as the canonical language table) on a graphify-aligned two-pass CALLS design: per-file name tables (pass 1), cross-file symbol binding (pass 2), per-language builtin blocklists, and the v2 discipline throughout — unresolved endpoints are dropped and counted, never guessed, never dangled
@@ -20,12 +22,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `make test` green in both extension modes: analyzer pytest **193** · perception suite **70** (zero skips) · loader and graphmcp Go tests · fixture check OK (`make test` and `make test EXTENSIONS=`)
 - `golang-complex` analyzer run (`--languages go`): `meta.languages: ["go"]`, `by_lang.go = {files: 5, types: 10, methods: 24, call_edges: 15}`, `import_edges: 4`, `go_unverifiable_satisfaction: 1` — and the method-set IMPLEMENTS multiset matches the frozen ground truth (pointer-receiver `AuditLog`/`Memory`, value-receiver `ReadOnlyLog`, one honest miss)
 - `MATCH (n {lang:'go'})`, `MATCH (f:File)-[:IMPORTS]->(g)`, and the Go IMPLEMENTS query (edge props `kind`/`receiver` visible via `RETURN e`) all answer from a v3 snapshot through the unchanged graphmcp
-
-### Changed
-- **Perception v2 engine (uv + Python + tree-sitter)** — deep structural analysis no longer requires a JDK/Gradle on the runtime path; the analyzer ships as a uv project (`perception/analyzer/`)
-  - **Config migration**: `structure_build_execution` is REMOVED (unknown keys in existing `~/.scv/config.json` are ignored — no action needed); no build ever executes inside the analyzed repository anymore, so `local` and `remote` sources are analyzed identically
-  - New config key `structure_extensions` (default `["springboot"]`): language extensions to enable; an empty list runs the language-agnostic structure layer only (structure-mode summary reports types/methods/call edges instead of components/edges); unknown values are warned into `perception.log` and dropped
-  - Degradation footnotes: `uv-missing` replaces `jdk-missing` (Python 3.11+ runtime wording); `analyzer-failed` replaces `adapter-build-failed`/`adapter-failed`/`degraded-noclasspath`
 
 ## [v0.11.1] - 2026-10-19
 
