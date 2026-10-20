@@ -96,14 +96,16 @@ def test_graph_out_to_json_schema():
     meta = payload["meta"]
     assert meta["engine"] == "treesitter-python"
     # v3 (spec 2026-10-20 §8): languages = emitted set, not a static list —
-    # an empty graph emits no languages; by_lang/import_edges are new keys.
+    # an empty graph emits no languages; by_lang/import_edges are new keys,
+    # and T3 adds the Go honest-miss counter go_unverifiable_satisfaction.
     assert meta["languages"] == []
     assert meta["extensions"] == ["springboot"]
     assert set(meta["structure"]) == {
         "files", "types", "methods", "call_edges",
         "dropped_edges", "unresolved_refs", "key_collisions",
-        "import_edges", "by_lang"}
+        "import_edges", "go_unverifiable_satisfaction", "by_lang"}
     assert meta["structure"]["import_edges"] == 0
+    assert meta["structure"]["go_unverifiable_satisfaction"] == 0
     assert meta["structure"]["by_lang"] == {}
     assert meta["beans"] == 0 and meta["inject_edges"] == 0 and meta["ambiguous"] == 0
 

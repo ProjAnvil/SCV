@@ -39,6 +39,10 @@ _LANGUAGE_SPECS: dict[str, LanguageSpec] = {
     "python": LanguageSpec("python", (".py",)),
     "javascript": LanguageSpec("javascript", (".js", ".jsx", ".mjs", ".cjs")),
     "typescript": LanguageSpec("typescript", (".ts", ".tsx", ".mts", ".cts")),
+    # Go keeps _test.go files (in-package methods are first-class, spec §4)
+    # and does NOT skip test/ dirs — the spec's skip list names only
+    # python/js/ts/rust.
+    "go": LanguageSpec("go", (".go",), skip_test_dirs=False),
 }
 
 

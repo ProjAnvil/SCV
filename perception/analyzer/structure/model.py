@@ -19,6 +19,7 @@ LANGUAGES = ["java"]
 _STRUCTURE_KEYS = (
     "files", "types", "methods", "call_edges",
     "dropped_edges", "unresolved_refs", "key_collisions",
+    "go_unverifiable_satisfaction",
 )
 
 
@@ -31,6 +32,9 @@ class Graph_out:
         self.key_collisions = 0
         self.dropped_edges = 0
         self.unresolved_refs = 0
+        # Go §5.1 honest-miss counter: (type, interface) satisfaction checks
+        # made unverifiable by external embedding — never guessed.
+        self.go_unverifiable_satisfaction = 0
         # bean-layer counter (top-level "unresolved", v1 backward-compat);
         # extensions fill it in (spec §6).
         self.unresolved = 0
@@ -140,6 +144,7 @@ class Graph_out:
             "unresolved_refs": self.unresolved_refs,
             "key_collisions": self.key_collisions,
             "import_edges": sum(1 for e in edges if e["label"] == "IMPORTS"),
+            "go_unverifiable_satisfaction": self.go_unverifiable_satisfaction,
             "by_lang": by_lang,
         }
         meta["beans"] = by_label.get("Bean", 0)

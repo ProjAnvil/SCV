@@ -26,7 +26,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))  # direct-script runs
 
 from extensions import registry
-from structure import java_extractor, jsts_extractor, python_extractor
+from structure import (go_extractor, java_extractor, jsts_extractor,
+                       python_extractor)
 from structure import langs as langs_registry
 from structure.model import Graph_out
 
@@ -76,6 +77,8 @@ def main(argv: list[str] | None = None) -> int:
             java_files = java_extractor.extract(repo, out)
         elif lang == "python":
             python_extractor.extract(repo, out)
+        elif lang == "go":
+            go_extractor.extract(repo, out)
         elif lang in ("javascript", "typescript"):
             jsts_langs.append(lang)
     if jsts_langs:
