@@ -6,6 +6,7 @@ requires-python = ">=3.11"
 dependencies = [
     "tree-sitter>=0.25,<0.26",
     "tree-sitter-java>=0.23,<0.24",
+    "tree-sitter-python>=0.25.0",
 ]
 
 [dependency-groups]

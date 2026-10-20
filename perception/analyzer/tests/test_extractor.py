@@ -95,11 +95,16 @@ def test_graph_out_to_json_schema():
     assert payload["unresolved"] == 0
     meta = payload["meta"]
     assert meta["engine"] == "treesitter-python"
-    assert meta["languages"] == ["java"]
+    # v3 (spec 2026-10-20 §8): languages = emitted set, not a static list —
+    # an empty graph emits no languages; by_lang/import_edges are new keys.
+    assert meta["languages"] == []
     assert meta["extensions"] == ["springboot"]
     assert set(meta["structure"]) == {
         "files", "types", "methods", "call_edges",
-        "dropped_edges", "unresolved_refs", "key_collisions"}
+        "dropped_edges", "unresolved_refs", "key_collisions",
+        "import_edges", "by_lang"}
+    assert meta["structure"]["import_edges"] == 0
+    assert meta["structure"]["by_lang"] == {}
     assert meta["beans"] == 0 and meta["inject_edges"] == 0 and meta["ambiguous"] == 0
 
 
