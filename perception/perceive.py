@@ -494,11 +494,20 @@ def main() -> int:
         return 0
     extensions, ext_warnings = resolve_extensions(cfg)
     languages, lang_warnings = resolve_languages(cfg)
+
+    # Config warnings must reach perception.log on EVERY exit path (spec
+    # §7: unknown values warn into the log) — the not-framework and
+    # tier-off returns below happen before the usual post-cleanup flush.
+    def _flush_warnings() -> None:
+        for warning in ext_warnings + lang_warnings:
+            log_line(analysis_dir, warning)
+
     if not languages:
         # v3 spec §7: empty structure_languages turns the structure tier off
         # entirely — the same clean skip as the enabled flag, no footnote.
         emit["status"], emit["reason"] = "skipped", "disabled"
         log_line(analysis_dir, "tier0 disabled by config (structure_languages is empty)")
+        _flush_warnings()
         print(json.dumps(emit, ensure_ascii=False))
         return 0
 
@@ -508,6 +517,7 @@ def main() -> int:
     if not detected:
         emit["status"], emit["reason"] = "not-framework", None
         log_line(analysis_dir, "tier1 detect: not-framework")
+        _flush_warnings()
         print(json.dumps(emit, ensure_ascii=False))
         return 0
 
@@ -520,8 +530,7 @@ def main() -> int:
     active_extensions = ["springboot"] if spring else []
 
     cleanup_stale(analysis_dir)
-    for warning in ext_warnings + lang_warnings:
-        log_line(analysis_dir, warning)
+    _flush_warnings()
     detect_line = "tier1 detect: springboot" if spring else "tier1 detect: structure"
     log_line(analysis_dir, f"{detect_line}, source={args.source}, "
                            f"extensions={active_extensions}, languages={detected}")

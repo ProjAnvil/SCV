@@ -859,6 +859,41 @@ class EndToEndTests(unittest.TestCase):
             self.assertEqual(payload["status"], "skipped")
             self.assertEqual(payload["reason"], "disabled")
 
+    def test_unknown_language_logged_on_not_framework_path(self):
+        # T8 acceptance item 5 fallout (spec §7: unknown values warn into
+        # perception.log): the not-framework early return must still flush
+        # the config warnings — a typo'd language plus a repo with no
+        # enabled language must not swallow the clue.
+        with TemporaryDirectory() as d:
+            d = Path(d)
+            repo = _python_repo(d / "repo")  # python tree, java-only config
+            out = d / "analysis"
+            res = _run_perceive(repo, out,
+                                cfg={"structure_languages": ["java", "kotlin"]})
+            self.assertEqual(res.returncode, 0, res.stderr)
+            payload = _payload(res)
+            self.assertEqual(payload["status"], "not-framework")
+            log = (out / "perception.log").read_text(encoding="utf-8")
+            self.assertIn("unknown value 'kotlin'", log)
+            self.assertIn("ignored", log)
+            self.assertFalse((out / "structure.json").exists())
+
+    def test_unknown_language_logged_on_tier_off_path(self):
+        # same flush contract for the tier-off (empty-after-validation) path
+        with TemporaryDirectory() as d:
+            d = Path(d)
+            repo = _python_repo(d / "repo")
+            out = d / "analysis"
+            res = _run_perceive(repo, out,
+                                cfg={"structure_languages": ["kotlin"]})
+            self.assertEqual(res.returncode, 0, res.stderr)
+            payload = _payload(res)
+            self.assertEqual(payload["status"], "skipped")
+            self.assertEqual(payload["reason"], "disabled")
+            log = (out / "perception.log").read_text(encoding="utf-8")
+            self.assertIn("unknown value 'kotlin'", log)
+            self.assertFalse((out / "structure.json").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

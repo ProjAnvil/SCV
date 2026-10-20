@@ -541,7 +541,10 @@ def _emit_type_edges(out, rel_path: str, jf: JavaFile, fqn: str, td: TypeDecl,
                 out.count_dropped_edge()  # unresolvable name
             else:
                 # resolved but not source-declared -> add_edge drops + counts
-                out.add_edge(type_key, f"type:{target}", label)
+                # IMPLEMENTS carries kind: declared (spec 2026-10-20 §5,
+                # written-in-source relation) like every other language.
+                props = {"kind": "declared"} if label == "IMPLEMENTS" else None
+                out.add_edge(type_key, f"type:{target}", label, props)
 
     _supers_to_edges(td.extends_names, "EXTENDS")
     _supers_to_edges(td.interfaces, "IMPLEMENTS")
