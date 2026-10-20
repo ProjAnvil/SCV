@@ -43,6 +43,9 @@ _LANGUAGE_SPECS: dict[str, LanguageSpec] = {
     # and does NOT skip test/ dirs — the spec's skip list names only
     # python/js/ts/rust.
     "go": LanguageSpec("go", (".go",), skip_test_dirs=False),
+    # crate structure (Cargo.toml -> src/lib.rs / src/main.rs -> mod tree)
+    # is discovered inside rust_extractor; the walk only lists .rs files.
+    "rust": LanguageSpec("rust", (".rs",)),
 }
 
 
