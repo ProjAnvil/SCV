@@ -226,6 +226,24 @@ already isolates it from cycle grading. Java gains it too (its import
 statements are already parsed for FQN resolution — marginal cost), so the
 edge is uniform across all six languages. **User-confirmed 2026-10-20.**
 
+**IMPORTS counting ruling (rev 3 addendum, reconciles the T3/T4 build
+deviations into one rule):**
+
+- import target is **external** (bare npm specifier, external Go package,
+  external crate, external java package) → **no edge, no count** — an
+  external import is not a repo reference (same philosophy as the builtin
+  filter, spec §3.1.3);
+- import target **resolves in-repo** but no symbol/identifier binds
+  (Go identifier-use miss, rust `use a::X` with X unknown, python
+  from-import of an unknown name, re-export beyond one hop) → **no edge +
+  `unresolved_refs` +1** — a name-resolution failure inside the repo is
+  exactly what that counter exists for;
+- an edge whose endpoints would dangle (target file not a declared node)
+  → `dropped_edges` via the standard Graph_out rule.
+
+This replaces the earlier per-language "counted" wording in §5's go cell;
+extractors are brought to this rule in T5.
+
 ## 6. CALLS resolution ladder (best-effort + honest counting)
 
 All extractors share the v2 discipline: unresolved receiver → drop +
