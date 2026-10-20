@@ -5,6 +5,7 @@
   "deep_analysis_enabled": false,
   "structure_analysis_enabled": true,
   "structure_extensions": ["springboot"],
+  "structure_languages": ["java", "python", "javascript", "typescript", "go", "rust"],
   "repos": [
     {
       "type": "remote",

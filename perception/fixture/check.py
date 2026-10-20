@@ -27,8 +27,23 @@ PERCEPTION_ROOT = Path(__file__).resolve().parent.parent
 PERCEIVE = PERCEPTION_ROOT / "perceive.py"
 
 # Which repos must yield a structure graph, and which must skip cleanly.
-EXPECT_STRUCTURE = ("java-springboot-monolith", "java-springboot-multimodule")
-EXPECT_SKIP = ("python-complex", "golang-complex")
+# v3 (spec 2026-10-20 §10): python-complex / golang-complex flipped from the
+# skip path to positive ground truths; ruby-plain keeps a deliberately
+# unsupported-language repo on the skip path.
+EXPECT_STRUCTURE = ("java-springboot-monolith", "java-springboot-multimodule",
+                    "python-complex", "golang-complex")
+EXPECT_SKIP = ("ruby-plain",)
+
+# v3 positive ground truths for the non-Java fixtures (spec §11.2):
+# files/types/methods frozen at the analyzer's measured truth (asserted as
+# floors so honest additive growth does not break the harness); by_lang must
+# carry the per-language split and meta.languages must name exactly the one
+# language each repo holds. call_edges is best-effort per language (spec §6)
+# — a floor of 1 proves resolution produced real edges.
+STRUCTURE_TRUTHS = {
+    "python-complex": {"lang": "python", "files": 4, "types": 9, "methods": 21},
+    "golang-complex": {"lang": "go", "files": 4, "types": 6, "methods": 19},
+}
 
 
 def write_config(fixture_dir: Path, extensions: list[str]) -> Path:
@@ -130,12 +145,44 @@ def check_multimodule(graph: dict | None, failures: list[str]) -> None:
             failures.append(f"{name}: missing cross-module edge {src} -> {dst}")
 
 
+def check_structure_ground_truth(analysis_home: Path, failures: list[str]) -> None:
+    """v3 non-Java fixtures: files/types/methods floors + by_lang split +
+    meta.languages (spec §11.2), in BOTH config modes (the structure tier is
+    language-gated, not extension-gated)."""
+    for name, truth in STRUCTURE_TRUTHS.items():
+        graph = load(analysis_home, name)
+        if graph is None:
+            failures.append(f"{name}: no structure.json (expected a structure graph)")
+            continue
+        meta = graph.get("meta") or {}
+        structure = meta.get("structure") or {}
+        for key in ("files", "types", "methods"):
+            if (structure.get(key) or 0) < truth[key]:
+                failures.append(f"{name}: structure.{key}={structure.get(key)!r}, "
+                                f"expected >= {truth[key]}")
+        if (structure.get("call_edges") or 0) < 1:
+            failures.append(f"{name}: structure.call_edges={structure.get('call_edges')!r}, "
+                            "expected >= 1")
+        if meta.get("languages") != [truth["lang"]]:
+            failures.append(f"{name}: meta.languages={meta.get('languages')!r}, "
+                            f"expected ['{truth['lang']}']")
+        by_lang = structure.get("by_lang") or {}
+        entry = by_lang.get(truth["lang"])
+        if not isinstance(entry, dict):
+            failures.append(f"{name}: meta.structure.by_lang[{truth['lang']!r}] missing")
+            continue
+        for key in ("files", "types", "methods"):
+            if (entry.get(key) or 0) < truth[key]:
+                failures.append(f"{name}: by_lang.{truth['lang']}.{key}="
+                                f"{entry.get(key)!r}, expected >= {truth[key]}")
+
+
 def check_skipped(analysis_home: Path, failures: list[str]) -> None:
-    """Non-Java repos must skip cleanly: no structure graph, exit 0."""
+    """Unsupported-language repos must skip cleanly: no structure graph, exit 0."""
     for name in EXPECT_SKIP:
         if (analysis_home / name / "structure.json").is_file():
-            failures.append(f"{name}: emitted structure.json, but perception is "
-                            "Java-only and must skip")
+            failures.append(f"{name}: emitted structure.json, but no enabled "
+                            "language is present and perception must skip")
 
 
 # ---- driver -------------------------------------------------------------- #
@@ -192,12 +239,17 @@ def main() -> int:
             failures.append(f"{name}: perceive.py crashed")
         elif name in EXPECT_SKIP and status not in ("skipped", "not-framework"):
             failures.append(f"{name}: expected a clean skip, got status {status!r}")
+        elif name in EXPECT_STRUCTURE and status != "ok":
+            failures.append(f"{name}: expected status 'ok', got {status!r}")
 
     # Bean-level expectations only apply when the Spring extension is active;
-    # structure mode produces no beans by design.
+    # structure mode produces no beans by design. The v3 structure ground
+    # truths hold in BOTH modes (the language gate is orthogonal to the
+    # extension gate).
     if spring:
         check_monolith(load(analysis_home, "java-springboot-monolith"), failures)
         check_multimodule(load(analysis_home, "java-springboot-multimodule"), failures)
+    check_structure_ground_truth(analysis_home, failures)
     check_skipped(analysis_home, failures)
 
     print()

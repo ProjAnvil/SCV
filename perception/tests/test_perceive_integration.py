@@ -130,7 +130,8 @@ class RealChainTests(unittest.TestCase):
             self.assertEqual(st["types"], 34)
             self.assertEqual(st["methods"], 52)
             self.assertTrue(10 <= st["call_edges"] <= 40, st)
-            self.assertRegex(payload["structure_summary"], r"^\d+ types, \d+ methods, \d+ call edges$")
+            self.assertRegex(payload["structure_summary"],
+                             r"^\d+ files, \d+ types, \d+ methods, \d+ call edges \(java\)$")
             # artifacts + tier log lines
             for key in ("structure_json", "structure_vg"):
                 self.assertTrue(Path(payload["artifacts"][key]).is_file())
@@ -187,20 +188,22 @@ class StructureModeTests(unittest.TestCase):
             st = payload["counts"]["structure"]
             self.assertEqual((st["files"], st["types"], st["methods"]), (33, 34, 52))
             self.assertTrue(10 <= st["call_edges"] <= 40, st)
-            self.assertRegex(payload["structure_summary"], r"^\d+ types, \d+ methods, \d+ call edges$")
+            self.assertRegex(payload["structure_summary"],
+                             r"^\d+ files, \d+ types, \d+ methods, \d+ call edges \(java\)$")
             graph = json.loads((out / "structure.json").read_text(encoding="utf-8"))
             self.assertNotIn("Bean", {n["label"] for n in graph["nodes"]})
             self.assertNotIn("INJECTS", {e["label"] for e in graph["edges"]})
             self.assertIn("Type", {n["label"] for n in graph["nodes"]})
             self.assertIn("Method", {n["label"] for n in graph["nodes"]})
             log = (out / "perception.log").read_text(encoding="utf-8")
-            self.assertIn("java (marker-only)", log)
+            self.assertIn("tier1 detect: structure", log)
+            self.assertIn("languages=['java']", log)
             self.assertIn("extensions=[]", log)
             self.assertEqual(graph["meta"]["extensions"], [])
 
     def test_plain_java_fixture_structure_mode(self):
-        # non-Spring Java tree: marker-file detect (pom.xml + sources, no
-        # spring content) -> structure mode, status ok (§8.5)
+        # non-Spring Java tree: v3 detect gate (java sources present, no
+        # marker file needed) -> structure mode, status ok (§8.5)
         with TemporaryDirectory() as d:
             d = Path(d)
             _copy_fixture(PLAIN_JAVA.parent, "plain-java", d / "repo")
@@ -211,9 +214,11 @@ class StructureModeTests(unittest.TestCase):
             payload = _payload(res)
             self.assertEqual(payload["status"], "ok")
             self.assertEqual(payload["counts"]["components"], 0)
+            self.assertEqual(payload["counts"]["languages"], ["java"])
             self.assertEqual(payload["counts"]["structure"],
                              {"files": 3, "types": 3, "methods": 4, "call_edges": 2})
-            self.assertEqual(payload["structure_summary"], "3 types, 4 methods, 2 call edges")
+            self.assertEqual(payload["structure_summary"],
+                             "3 files, 3 types, 4 methods, 2 call edges (java)")
 
 
 class DegradedPathTests(unittest.TestCase):

@@ -200,10 +200,11 @@ python3 ~/.scv/perception/perceive.py {analysis_path} ~/.scv/analysis/{repo_name
 
 Summary line — two rendering modes:
 
-- **Structure mode** (`structure_summary` is non-null AND `counts.components` is null/0 — no component layer, all language extensions off): render the ready-made `structure_summary` string from the JSON:
+- **Structure mode** (`structure_summary` is non-null AND `counts.components` is null/0 — no component layer): render the ready-made `structure_summary` string from the JSON:
   ```
   🧭 Deep structural analysis: {structure_summary}.
   ```
+  The string is a multi-language aggregate ending with the analyzed language list, e.g. `7 files, 8 types, 9 methods, 4 call edges (java, python)`.
 - **Component mode** (otherwise): render from `counts`:
   ```
   🧭 Deep structural analysis: Spring Boot project — {components} components, {edges} dependency edges, {cycles_fatal + cycles_tolerated} circular dependencies ({cycles_fatal} startup-fatal / {cycles_tolerated} tolerated).

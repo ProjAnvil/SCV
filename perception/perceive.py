@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""SCV Code Perception orchestrator (v2 — uv + Python + tree-sitter engine).
+"""SCV Code Perception orchestrator (v3 — uv + Python + tree-sitter engine).
 
 Contract (spec 2026-10-13 rev2 §5.1): single-line JSON on stdout, exit 0 always.
 Usage: perceive.py <repo_path> <analysis_dir> --source local|remote [--lang zh|en]
@@ -9,6 +9,15 @@ via `uv run --project perception/analyzer`; language extensions are gated by
 the `structure_extensions` config key (default ["springboot"]); no build ever
 executes inside the analyzed repo (local and remote are analyzed identically,
 `--source` is still recorded for audit).
+
+v3 (spec 2026-10-20): the structure tier is multi-language — the detect gate
+walks the repo for the extensions of every language enabled via the
+`structure_languages` config key (default: all six shipped) and the tier runs
+when ANY enabled language has >= 1 source file; `not-framework` survives only
+as the "no enabled language present" outcome. The analyzer is fed
+`--languages` from the config ∩ detected set; the springboot extension keeps
+its own Spring-marker detection on top of java, orthogonal to
+`structure_languages`.
 """
 from __future__ import annotations
 
@@ -47,16 +56,44 @@ FOOTNOTES = {
     ),
 }
 
-# Structure-mode summary wording (spec 2026-10-14 §6, verbatim) — surfaced as
-# the `structure_summary` stdout field so report rendering needs no logic.
+# Structure-mode summary wording (v3 spec §7, multi-language aggregate) —
+# surfaced as the `structure_summary` stdout field so report rendering needs
+# no logic. The language clause is appended from analyzer meta.languages
+# (counts passthrough); a v2-shaped analyzer graph without that field renders
+# the aggregate only (backwards compat).
 STRUCTURE_SUMMARY = (
-    "{types} 个类型、{methods} 个方法、{call_edges} 条调用边",
-    "{types} types, {methods} methods, {call_edges} call edges",
+    "{files} 个文件、{types} 个类型、{methods} 个方法、{call_edges} 条调用边",
+    "{files} files, {types} types, {methods} methods, {call_edges} call edges",
 )
 
 # Language extensions known to the shipped analyzer (spec §7: config key
 # `structure_extensions`, default ["springboot"]; unknown values warn + drop).
 KNOWN_EXTENSIONS = ("springboot",)
+
+# v3 spec §4 — language table mirror. The analyzer's structure/langs.py is the
+# canonical registry; perceive.py keeps its own walk code (v2 precedent), so
+# the suffix + exclusion tables are duplicated here by contract.
+LANGUAGE_SUFFIXES = {
+    "java": (".java",),
+    "python": (".py",),
+    "javascript": (".js", ".jsx", ".mjs", ".cjs"),
+    "typescript": (".ts", ".tsx", ".mts", ".cts"),
+    "go": (".go",),
+    "rust": (".rs",),
+}
+KNOWN_LANGUAGES = tuple(sorted(LANGUAGE_SUFFIXES))
+
+# Shared walk exclusions (spec §4): build outputs, caches, vendored trees,
+# dot-directories — mirrors langs.py.
+_EXCLUDED_DIRS = {
+    "node_modules", "__pycache__", "venv", ".venv", "env",
+    "dist", "build", ".gradle", "target", "vendor", "testdata", "out",
+}
+# Test trees skipped for the non-java walks (spec §4); go keeps test dirs and
+# *_test.go files, java keeps its own src/test handling inside source-root
+# discovery — neither opts in here.
+_TEST_DIRS = {"test", "tests"}
+_SKIP_TEST_DIRS = {"python", "javascript", "typescript", "rust"}
 
 
 def log_line(analysis_dir: Path, message: str) -> None:
@@ -109,6 +146,42 @@ def _has_java_source(repo: Path) -> bool:
     return False
 
 
+def _detect_by_suffix(repo: Path, names: list[str]) -> list[str]:
+    """Walk the repo once; return every requested language with >= 1 source
+    file. Exclusions mirror the analyzer's langs.py table (spec §4):
+    _EXCLUDED_DIRS + dot-dirs always; test/tests subtrees skipped only for
+    the languages that opted in (python/js/ts/rust — go and java keep them).
+    """
+    pending = set(names)
+    found: set[str] = set()
+    for dirpath, dirnames, filenames in os.walk(repo):
+        dirnames[:] = [d for d in dirnames
+                       if d not in _EXCLUDED_DIRS and not d.startswith(".")]
+        parts = Path(dirpath).relative_to(repo).parts
+        test_tree = any(p in _TEST_DIRS for p in parts)
+        for fn in filenames:
+            for name in pending:
+                if name in _SKIP_TEST_DIRS and test_tree:
+                    continue
+                if fn.endswith(LANGUAGE_SUFFIXES[name]):
+                    found.add(name)
+        pending -= found
+        if not pending:
+            break
+    return sorted(found)
+
+
+def detect_languages(repo: Path, enabled: list[str]) -> list[str]:
+    """v3 detect gate (spec 2026-10-20 §7): the structure tier runs when ANY
+    enabled language has >= 1 source file. Java keeps its v2 source-root walk
+    (spec §4 java row); every other language is found by suffix walk."""
+    found: list[str] = []
+    if "java" in enabled and _has_java_source(repo):
+        found.append("java")
+    found.extend(_detect_by_suffix(repo, [n for n in enabled if n != "java"]))
+    return sorted(found)
+
+
 def detect_framework(repo: Path, manifest: dict) -> bool:
     det = manifest["detect"]
     candidate = False
@@ -145,15 +218,6 @@ def detect_framework(repo: Path, manifest: dict) -> bool:
     return False
 
 
-def detect_java_marker_only(repo: Path, manifest: dict) -> bool:
-    """Empty-extension degrade (spec 2026-10-14 §3): any MANIFEST marker file
-    plus at least one .java source under a discovered source root — the
-    structure core still runs on non-Spring Java repos."""
-    for _ in _iter_marker_files(repo, manifest["detect"]["marker_files"]):
-        return _has_java_source(repo)
-    return False
-
-
 def resolve_extensions(cfg: dict):
     """Validate `structure_extensions` (default ["springboot"]).
 
@@ -173,6 +237,30 @@ def resolve_extensions(cfg: dict):
             resolved.append(name)
         elif name not in KNOWN_EXTENSIONS:
             warnings.append(f"config structure_extensions unknown value {name!r} — dropped")
+    return resolved, warnings
+
+
+def resolve_languages(cfg: dict):
+    """Validate `structure_languages` (v3 spec §7: default = every shipped
+    language).
+
+    Unknown values warn + are ignored (structure_extensions precedent). An
+    empty list — including a non-list shape or a list of only unknown values —
+    turns the structure tier off entirely: same clean skip as
+    structure_analysis_enabled=false, no footnote (the tier is off by config,
+    nothing degraded)."""
+    raw = cfg.get("structure_languages")
+    if raw is None:
+        return list(KNOWN_LANGUAGES), []
+    if not isinstance(raw, list):
+        return [], [f"config structure_languages not a list ({raw!r}) — ignored"]
+    resolved: list[str] = []
+    warnings: list[str] = []
+    for name in raw:
+        if name in LANGUAGE_SUFFIXES and name not in resolved:
+            resolved.append(name)
+        elif name not in LANGUAGE_SUFFIXES:
+            warnings.append(f"config structure_languages unknown value {name!r} — ignored")
     return resolved, warnings
 
 
@@ -244,11 +332,14 @@ def _exc_tail(e) -> str:
     return _log_tail(detail)
 
 
-def run_analyzer(repo: Path, out_json: Path, analysis_dir: Path, extensions: list[str]) -> bool:
-    """Run the v2 analyzer (uv tier). Honors SCV_PERCEPTION_ANALYZER (a
+def run_analyzer(repo: Path, out_json: Path, analysis_dir: Path, extensions: list[str],
+                 languages: list[str] | None = None) -> bool:
+    """Run the v3 analyzer (uv tier). Honors SCV_PERCEPTION_ANALYZER (a
     substitute analyzer executable invoked directly, bypassing uv — used by
     tests with fakes that accept the same CLI). A duration line plus any
-    non-fatal stderr tail lands in perception.log on EVERY run."""
+    non-fatal stderr tail lands in perception.log on EVERY run. `languages`
+    is the config ∩ detected set fed to --languages (v3 spec §7); empty/None
+    omits the flag (the analyzer defaults to every shipped language)."""
     override = os.environ.get("SCV_PERCEPTION_ANALYZER")
     if override:
         cmd = [override, str(repo), str(out_json)]
@@ -258,6 +349,8 @@ def run_analyzer(repo: Path, out_json: Path, analysis_dir: Path, extensions: lis
         cmd = ["uv", "run", "--project", str(PERCEPTION_ROOT / "analyzer"),
                "python", str(PERCEPTION_ROOT / "analyzer" / "analyzer.py"),
                str(repo), str(out_json)]
+    if languages:
+        cmd += ["--languages", *languages]
     if extensions:
         cmd += ["--extensions", *extensions]
     started = time.monotonic()
@@ -268,7 +361,8 @@ def run_analyzer(repo: Path, out_json: Path, analysis_dir: Path, extensions: lis
         return False
     duration = time.monotonic() - started
     log_line(analysis_dir, f"tier3 analyzer rc={res.returncode} duration={duration:.1f}s "
-                           f"extensions={extensions} out={'yes' if out_json.exists() else 'no'}"
+                           f"extensions={extensions} languages={languages or []} "
+                           f"out={'yes' if out_json.exists() else 'no'}"
                            + (f" stderr: {_log_tail(res.stderr)}" if res.stderr and res.stderr.strip() else ""))
     return res.returncode == 0 and out_json.exists()
 
@@ -276,22 +370,33 @@ def run_analyzer(repo: Path, out_json: Path, analysis_dir: Path, extensions: lis
 def build_counts(graph: dict) -> dict:
     """v2 counts (spec §6): components/edges are label-filtered (Bean nodes /
     INJECTS edges — never len() of the mixed arrays, keeping v1 report
-    semantics) and the structure sub-counts ride along from meta."""
+    semantics) and the structure sub-counts ride along from meta. v3 adds the
+    meta.languages passthrough (spec §8) for the summary wording."""
     counts = {
         "components": sum(1 for n in graph.get("nodes", []) if n.get("label") == "Bean"),
         "edges": sum(1 for e in graph.get("edges", []) if e.get("label") == "INJECTS"),
         "cycles_fatal": 0, "cycles_tolerated": 0,
     }
-    structure = (graph.get("meta") or {}).get("structure") or {}
+    meta = graph.get("meta") or {}
+    structure = meta.get("structure") or {}
     counts["structure"] = {k: structure.get(k) for k in ("files", "types", "methods", "call_edges")}
+    counts["languages"] = list(meta.get("languages") or [])
     return counts
 
 
-def render_structure_summary(structure: dict, lang: str = "zh") -> str:
+def render_structure_summary(structure: dict, lang: str = "zh",
+                             languages: list[str] | None = None) -> str:
     idx = 0 if lang.startswith("zh") else 1
-    return STRUCTURE_SUMMARY[idx].format(
-        types=structure.get("types"), methods=structure.get("methods"),
-        call_edges=structure.get("call_edges"))
+    text = STRUCTURE_SUMMARY[idx].format(
+        files=structure.get("files"), types=structure.get("types"),
+        methods=structure.get("methods"), call_edges=structure.get("call_edges"))
+    languages = [l for l in (languages or []) if l]
+    if languages:
+        if lang.startswith("zh"):
+            text += f"（{'、'.join(languages)}）"
+        else:
+            text += f" ({', '.join(languages)})"
+    return text
 
 
 def _go_binary_is_stale(binary: Path, source_dir: Path) -> bool:
@@ -388,26 +493,38 @@ def main() -> int:
         print(json.dumps(emit, ensure_ascii=False))
         return 0
     extensions, ext_warnings = resolve_extensions(cfg)
+    languages, lang_warnings = resolve_languages(cfg)
+    if not languages:
+        # v3 spec §7: empty structure_languages turns the structure tier off
+        # entirely — the same clean skip as the enabled flag, no footnote.
+        emit["status"], emit["reason"] = "skipped", "disabled"
+        log_line(analysis_dir, "tier0 disabled by config (structure_languages is empty)")
+        print(json.dumps(emit, ensure_ascii=False))
+        return 0
 
-    adapter = load_manifest("springboot")
-    if extensions:
-        detected = detect_framework(repo, adapter)
-        detect_line = "tier1 detect: springboot"
-    else:
-        # structure mode (all extensions off): marker-file-only Java detection
-        # so the language-agnostic core still runs on non-Spring Java repos.
-        detected = detect_java_marker_only(repo, adapter)
-        detect_line = "tier1 detect: java (marker-only)"
+    # v3 detect gate (spec 2026-10-20 §7): the tier runs when ANY enabled
+    # language has >= 1 source file; `not-framework` only when none does.
+    detected = detect_languages(repo, languages)
     if not detected:
         emit["status"], emit["reason"] = "not-framework", None
         log_line(analysis_dir, "tier1 detect: not-framework")
         print(json.dumps(emit, ensure_ascii=False))
         return 0
 
+    # The springboot extension keeps its own Spring-marker detection on top
+    # of java (unchanged, v2 two-stage); its structure_extensions gate is
+    # orthogonal to structure_languages. Undetected -> the extension simply
+    # does not engage: the analyzer runs the language-agnostic core only.
+    adapter = load_manifest("springboot")
+    spring = bool(extensions) and detect_framework(repo, adapter)
+    active_extensions = ["springboot"] if spring else []
+
     cleanup_stale(analysis_dir)
-    for warning in ext_warnings:
+    for warning in ext_warnings + lang_warnings:
         log_line(analysis_dir, warning)
-    log_line(analysis_dir, f"{detect_line}, source={args.source}, extensions={extensions}")
+    detect_line = "tier1 detect: springboot" if spring else "tier1 detect: structure"
+    log_line(analysis_dir, f"{detect_line}, source={args.source}, "
+                           f"extensions={active_extensions}, languages={detected}")
 
     reasons: list[str] = []
     if os.environ.get("SCV_PERCEPTION_ANALYZER"):
@@ -423,7 +540,7 @@ def main() -> int:
             return 0
 
     structure_json = analysis_dir / "structure.json"
-    if not run_analyzer(repo, structure_json, analysis_dir, extensions):
+    if not run_analyzer(repo, structure_json, analysis_dir, active_extensions, detected):
         emit["reason"] = "analyzer-failed"
         emit["footnote"] = render_footnote(["analyzer-failed"], args.lang)
         print(json.dumps(emit, ensure_ascii=False))
@@ -444,7 +561,8 @@ def main() -> int:
     emit["artifacts"]["structure_json"] = str(structure_json)
     structure = counts.get("structure") or {}
     if all(isinstance(v, int) for v in structure.values()):
-        emit["structure_summary"] = render_structure_summary(structure, args.lang)
+        emit["structure_summary"] = render_structure_summary(
+            structure, args.lang, counts.get("languages"))
 
     vg_path = analysis_dir / "structure.vg"
     loader_info = None

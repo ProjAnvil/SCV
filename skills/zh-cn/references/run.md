@@ -188,10 +188,11 @@ python3 ~/.scv/perception/perceive.py {analysis_path} ~/.scv/analysis/{repo_name
 
 摘要行 — 两种渲染模式：
 
-- **结构模式**（`structure_summary` 非空且 `counts.components` 为 null/0（无组件层）—— 所有语言扩展均已关闭）：直接渲染 JSON 中现成的 `structure_summary` 字符串：
+- **结构模式**（`structure_summary` 非空且 `counts.components` 为 null/0（无组件层））：直接渲染 JSON 中现成的 `structure_summary` 字符串：
   ```
   🧭 深度结构分析：{structure_summary}。
   ```
+  该字符串为多语言聚合并以分析出的语言列表结尾，例如 `7 个文件、8 个类型、9 个方法、4 条调用边（java、python）`。
 - **组件模式**（其余情况）：用 `counts` 渲染：
   ```
   🧭 深度结构分析：检测到 Spring Boot 项目 — {components} 个组件、{edges} 条依赖边、循环依赖 {cycles_fatal + cycles_tolerated} 处（{cycles_fatal} 处启动级 / {cycles_tolerated} 处容忍级）。
