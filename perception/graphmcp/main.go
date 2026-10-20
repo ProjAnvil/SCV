@@ -238,11 +238,15 @@ func newServer(svc *service) *mcp.Server {
 			"Type (key 'type:<fqn>', props: kind (class/interface/record/enum/annotation), modifiers, loc); " +
 			"Method (key 'fn:<fqn>#<name>(<params>)', props: name, visibility, static, params, returns, owner (Type key), loc); " +
 			"File (key 'file:<repo-relative path>', props: path, language, loc). " +
+			"Multi-language repositories: Type/Method nodes carry props.lang and File nodes carry language + lang (values e.g. java, python, javascript, typescript, go, rust) — filter with MATCH (n {lang:'python'}) RETURN n. " +
 			"Edge labels: INJECTS (Bean→Bean, props via/qualifier/wraps/ambiguous); " +
 			"CALLS (Method→Method, props line, kind direct|virtual-dispatch); " +
+			"IMPORTS (File→File, cross-file dependency); " +
 			"IMPLEMENTS and EXTENDS (Type→Type); CONTAINS (File→Type); REFERENCES (Method→Type, prop line). " +
 			"Examples: " +
 			"MATCH (n {stereotype:'Service'})-[:INJECTS]->(m) RETURN n.key, m.key; " +
+			"MATCH (n {lang:'python'}) RETURN n.key; " +
+			"MATCH (f:File)-[:IMPORTS]->(g) RETURN f.key, g.key; " +
 			"MATCH (t:Type)-[:IMPLEMENTS]->(i {kind:'interface'}) RETURN t.key, i.key; " +
 			"MATCH (m:Method)-[:CALLS]->(n:Method {name:'greet'}) RETURN m.owner, m.name",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},

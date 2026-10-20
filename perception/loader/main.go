@@ -59,6 +59,9 @@ func loadGraph(jsonPath string) (*vectra.Graph, int) {
 		fatal(err)
 	}
 	gr := vectra.New()
+	// No "lang" index declaration needed (spec §9(b), downgraded after the
+	// T7 spike): vectra's Cypher falls back to a node scan for unindexed
+	// {prop} keys, so MATCH (n {lang:'python'}) hits on snapshots as-is.
 	for _, k := range []string{"stereotype", "beanName", "type", "conditions"} {
 		gr.IndexProperty(k)
 	}

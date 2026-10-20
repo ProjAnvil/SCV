@@ -321,11 +321,13 @@ per language, honest ladder:
 ## 9. Loader / graphmcp deltas (Go)
 
 - **Loader**: (a) IMPORTS edges pass through as-is (label-agnostic load,
-  already); (b) property-index declarations gain `lang` so
-  `MATCH (n {lang:'python'})` works from v3 snapshots (precedent:
-  stereotype index for the same reason, v0.10.0); (c) cycle grading filter
-  already INJECTS-only — new labels can't leak in; loader tests extended
-  with an IMPORTS-bearing fixture.
+  already); (b) **verified no `lang` property index needed** (T7 spike,
+  2026-10-20: golang-complex snapshot, 29/29 nodes hit by
+  `MATCH (n {lang:'go'})`) — snapshot `{prop}` queries fall back to a node
+  scan for unindexed keys (vectra v0.6 `anchorCandidates`/`nodePred`), so
+  `MATCH (n {lang:'python'})` works from v3 snapshots as-is; (c) cycle
+  grading filter already INJECTS-only — new labels can't leak in; loader
+  tests extended with an IMPORTS-bearing fixture.
 - **graphmcp**: zero code change expected; test matrix gains lang-anchored
   and IMPORTS-traversal Cypher queries.
 
@@ -362,7 +364,8 @@ per language, honest ladder:
 6. Repo with no enabled language (e.g. only `.rb`) → `status: skipped`,
    exit 0, no structure.json/.vg — the skip path stays clean.
 7. graphmcp from a v3 snapshot: `repos`/`cypher`/`get_node`/`refresh`
-   unchanged; lang index works from snapshot (not just live build).
+   unchanged; lang-anchored queries work from snapshot (not just live
+   build, and without any lang index — §9(b)).
 8. Perf: each new fixture < 10s in the analyzer; uv sync still < 60s first
    run (5 new pinned grammars are small).
 9. install.sh whitelist already ships `analyzer/` wholesale — verify
