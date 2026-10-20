@@ -1,10 +1,19 @@
-"""tree-sitter-java structure extraction (spec 2026-10-14 §3/§4).
+"""tree-sitter-java structure extraction (spec 2026-10-14 §3/§4; v3
+2026-10-20 §5/§8).
 
-Emits File/Type/Method nodes plus CONTAINS/IMPLEMENTS/EXTENDS/CALLS/
-REFERENCES edges into a :class:`~structure.model.Graph_out`. FQN resolution
-is purely syntactic: explicit single-type imports, then wildcard imports
-matched against known source simple names, then the same package — anything
-else is dropped and counted, never dangled.
+Emits File/Type/Method nodes (props carry ``lang: "java"``; File writes both
+``language`` and ``lang``) plus CONTAINS/IMPLEMENTS/EXTENDS/CALLS/
+REFERENCES/IMPORTS edges into a :class:`~structure.model.Graph_out`. FQN
+resolution is purely syntactic: explicit single-type imports, then wildcard
+imports matched against known source simple names, then the same package —
+anything else is dropped and counted, never dangled.
+
+IMPORTS (File→File, v3 §5 java column): a single-type import whose FQN
+names an in-source type earns an edge to the declaring file. Wildcard and
+static imports never earn an edge; external imports are not repo references
+(rev3 counting ruling: no edge, no count). Nested-type imports written in
+dotted form (``a.Outer.Inner``) do not match the ``$``-chained FQN scheme —
+documented approximation, no edge.
 
 CALLS/REFERENCES come from a second pass over the retained parse trees:
 receiver resolution is scope-based (params, locals from declarators, fields
@@ -452,13 +461,18 @@ def extract(repo: Path, out) -> list[JavaFile]:
     for jf in java_files:
         rel = jf.path.relative_to(repo).as_posix()
         out.add_node(f"file:{rel}", "File",
-                     {"path": rel, "language": "java", "loc": jf.loc})
+                     {"path": rel, "language": "java", "lang": "java",
+                      "loc": jf.loc})
         for fqn, td in _iter_types(jf.types, jf.package):
             _emit_type_nodes(out, fqn, td)
             declared.append((rel, jf, fqn, td))
 
     for rel, jf, fqn, td in declared:
         _emit_type_edges(out, rel, jf, fqn, td, source_fqns)
+
+    # IMPORTS (v3 §5 java column): single-type import -> declaring file.
+    _emit_imports(out, repo, java_files,
+                  {fqn: rel for rel, _jf, fqn, _td in declared})
 
     types_by_fqn: dict[str, tuple[JavaFile, TypeDecl]] = {
         fqn: (jf, td) for _rel, jf, fqn, td in declared}
@@ -485,13 +499,34 @@ def extract(repo: Path, out) -> list[JavaFile]:
 def _emit_type_nodes(out, fqn: str, td: TypeDecl) -> None:
     type_key = f"type:{fqn}"
     out.add_node(type_key, "Type",
-                 {"kind": td.kind, "modifiers": td.modifiers, "loc": td.line})
+                 {"lang": "java", "kind": td.kind,
+                  "modifiers": td.modifiers, "loc": td.line})
     for m in td.methods:
         out.add_node(f"fn:{fqn}#{m.name}({','.join(m.params)})", "Method", {
-            "name": m.name, "visibility": m.visibility, "static": m.static,
-            "params": m.params, "returns": m.returns, "loc": m.line,
-            "owner": type_key,
+            "lang": "java", "name": m.name, "visibility": m.visibility,
+            "static": m.static, "params": m.params, "returns": m.returns,
+            "loc": m.line, "owner": type_key,
         })
+
+
+def _emit_imports(out, repo: Path, java_files: list[JavaFile],
+                  file_of_fqn: dict[str, str]) -> None:
+    """IMPORTS File→File: importing file -> file declaring the imported
+    in-source type. Wildcard/static imports and external packages earn no
+    edge and no count (spec 2026-10-20 §5 + rev3 ruling)."""
+    for jf in java_files:
+        rel = jf.path.relative_to(repo).as_posix()
+        file_key = f"file:{rel}"
+        seen: set[str] = set()
+        for imp in jf.imports:
+            if imp.wildcard or imp.static:
+                continue
+            target = file_of_fqn.get(imp.name)
+            if target is None or target == rel:
+                continue  # external package / self — no edge, no count
+            if target not in seen and out.add_import(file_key,
+                                                     f"file:{target}"):
+                seen.add(target)
 
 
 def _emit_type_edges(out, rel_path: str, jf: JavaFile, fqn: str, td: TypeDecl,
@@ -506,7 +541,10 @@ def _emit_type_edges(out, rel_path: str, jf: JavaFile, fqn: str, td: TypeDecl,
                 out.count_dropped_edge()  # unresolvable name
             else:
                 # resolved but not source-declared -> add_edge drops + counts
-                out.add_edge(type_key, f"type:{target}", label)
+                # IMPLEMENTS carries kind: declared (spec 2026-10-20 §5,
+                # written-in-source relation) like every other language.
+                props = {"kind": "declared"} if label == "IMPLEMENTS" else None
+                out.add_edge(type_key, f"type:{target}", label, props)
 
     _supers_to_edges(td.extends_names, "EXTENDS")
     _supers_to_edges(td.interfaces, "IMPLEMENTS")

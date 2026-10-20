@@ -19,6 +19,7 @@ LANGUAGES = ["java"]
 _STRUCTURE_KEYS = (
     "files", "types", "methods", "call_edges",
     "dropped_edges", "unresolved_refs", "key_collisions",
+    "go_unverifiable_satisfaction",
 )
 
 
@@ -31,6 +32,9 @@ class Graph_out:
         self.key_collisions = 0
         self.dropped_edges = 0
         self.unresolved_refs = 0
+        # Go §5.1 honest-miss counter: (type, interface) satisfaction checks
+        # made unverifiable by external embedding — never guessed.
+        self.go_unverifiable_satisfaction = 0
         # bean-layer counter (top-level "unresolved", v1 backward-compat);
         # extensions fill it in (spec §6).
         self.unresolved = 0
@@ -77,6 +81,10 @@ class Graph_out:
         """CALLS edge with line/kind props (same drop rule)."""
         return self.add_edge(src, dst, "CALLS", {"line": line, "kind": kind})
 
+    def add_import(self, src: str, dst: str) -> bool:
+        """IMPORTS edge, File→File (spec 2026-10-20 §5; same drop rule)."""
+        return self.add_edge(src, dst, "IMPORTS")
+
     def count_dropped_edge(self) -> None:
         """Account an edge that was never constructible (unresolved name)."""
         self.dropped_edges += 1
@@ -87,13 +95,46 @@ class Graph_out:
 
     # ---- output ----
 
+    @staticmethod
+    def _node_lang(node: dict) -> str | None:
+        props = node.get("props", {})
+        return props.get("lang") or props.get("language")
+
     def to_json(self) -> dict:
         nodes = list(self._nodes.values())
         edges = list(self._edges)
         by_label: dict[str, int] = {}
         for n in nodes:
             by_label[n["label"]] = by_label.get(n["label"], 0) + 1
+
+        # per-language counts (spec 2026-10-20 §8): files from File nodes,
+        # types/methods from nodes carrying a lang, call edges via the src
+        # node's language. ``lang`` falls back to ``language`` so v2 java
+        # File nodes are counted until T5 adds lang to Type/Method.
+        node_lang = {n["key"]: self._node_lang(n) for n in nodes}
+        by_lang: dict[str, dict[str, int]] = {}
+        for n in nodes:
+            lang = node_lang[n["key"]]
+            if lang is None:
+                continue
+            slot = by_lang.setdefault(
+                lang, {"files": 0, "types": 0, "methods": 0, "call_edges": 0})
+            if n["label"] == "File":
+                slot["files"] += 1
+            elif n["label"] == "Type":
+                slot["types"] += 1
+            elif n["label"] == "Method":
+                slot["methods"] += 1
+        for e in edges:
+            if e["label"] == "CALLS":
+                lang = node_lang.get(e["srcKey"])
+                if lang is not None:
+                    by_lang.setdefault(
+                        lang, {"files": 0, "types": 0, "methods": 0,
+                               "call_edges": 0})["call_edges"] += 1
+
         meta = dict(self.meta)
+        meta["languages"] = sorted(by_lang)
         meta["structure"] = {
             "files": by_label.get("File", 0),
             "types": by_label.get("Type", 0),
@@ -102,6 +143,9 @@ class Graph_out:
             "dropped_edges": self.dropped_edges,
             "unresolved_refs": self.unresolved_refs,
             "key_collisions": self.key_collisions,
+            "import_edges": sum(1 for e in edges if e["label"] == "IMPORTS"),
+            "go_unverifiable_satisfaction": self.go_unverifiable_satisfaction,
+            "by_lang": by_lang,
         }
         meta["beans"] = by_label.get("Bean", 0)
         meta["inject_edges"] = sum(1 for e in edges if e["label"] == "INJECTS")

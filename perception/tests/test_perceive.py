@@ -1,11 +1,18 @@
-"""perceive.py v2 unit suite (spec 2026-10-14 §6/§7; plan Task 5).
+"""perceive.py unit suite (v2 spec 2026-10-14 §6/§7 + v3 spec 2026-10-20 §7).
 
-Covers the v2 tier set: two-stage springboot detect (unchanged) + the new
-empty-extension marker-only path, the uv probe, the v2 footnote set verbatim,
-extension gating (unknown values warn + drop), stale cleanup, label-filtered
-counts + structure sub-counts + structure-mode summary wording, and the
-analyzer tier end-to-end through SCV_PERCEPTION_ANALYZER fakes (ok / failing /
-garbage-output / missing-output paths, uv-missing, structure mode).
+Covers the v2 tier set: two-stage springboot detect (unchanged), the uv
+probe, the v2 footnote set verbatim, extension gating (unknown values warn +
+drop), stale cleanup, label-filtered counts + structure sub-counts +
+structure-mode summary wording, and the analyzer tier end-to-end through
+SCV_PERCEPTION_ANALYZER fakes (ok / failing / garbage-output / missing-output
+paths, uv-missing, structure mode).
+
+v3 additions (plan Task 6): the `structure_languages` config gate (default
+all six, unknown warn+ignore, empty = tier off), the extension-driven detect
+walk (any enabled language with >= 1 source file runs the structure tier;
+`not-framework` only when no enabled language is present), `--languages` fed
+to the analyzer from config ∩ detected, and the multi-language aggregate
+summary wording (files + language list, zh/en).
 
 End-to-end cases run perceive.py as a subprocess with a controlled HOME
 (config) and a minimal PATH — hermetic: no uv/go/java/gradle needed.
@@ -29,16 +36,17 @@ ROOT = Path(__file__).resolve().parents[1]
 MINIMAL_PATH = "/usr/bin:/bin"
 
 
-def _write_fake(path: Path, mode: str) -> Path:
+def _write_fake(path: Path, mode: str, graph: dict | None = None) -> Path:
     path.write_text(FAKE_ANALYZER_TEMPLATE
                     .replace("__MODE__", mode)
-                    .replace("__GRAPH__", json.dumps(FAKE_GRAPH)))
+                    .replace("__GRAPH__", json.dumps(graph if graph is not None else FAKE_GRAPH)))
     path.chmod(0o755)
     return path
 
 
 # The graph the fake analyzer emits (single source of truth: injected into the
-# fake template AND asserted against in CountsTests).
+# fake template AND asserted against in CountsTests). v3-shaped: meta.languages
+# + meta.structure.by_lang (v3 spec §8).
 FAKE_GRAPH = {
     "nodes": [
         {"key": "file:src/main/java/com/x/App.java", "label": "File"},
@@ -58,20 +66,37 @@ FAKE_GRAPH = {
     "meta": {
         "engine": "treesitter-python", "languages": ["java"], "extensions": [],
         "structure": {"files": 7, "types": 8, "methods": 9, "call_edges": 4,
-                      "dropped_edges": 1, "unresolved_refs": 2, "key_collisions": 0},
+                      "dropped_edges": 1, "unresolved_refs": 2, "key_collisions": 0,
+                      "by_lang": {"java": {"files": 7, "types": 8, "methods": 9,
+                                           "call_edges": 4}}},
         "beans": 3, "inject_edges": 2, "ambiguous": 0,
     },
 }
 
 
 # A stand-in analyzer executable: same CLI as analyzer.py
-# (<repo> <out> [--extensions ...]); records its argv next to the output file.
+# (<repo> <out> [--extensions EXT...] [--languages LANG...]); records its argv
+# next to the output file. When the emitted graph is v3-shaped (has
+# meta.languages) the fake mirrors the --languages it received into the graph,
+# like the real analyzer does; a graph without meta.languages stays v2-shaped
+# (the backwards-compat path).
 FAKE_ANALYZER_TEMPLATE = '''#!/usr/bin/env python3
 import json, sys
 args = sys.argv[1:]
 repo, out = args[0], args[1]
 with open(out + ".argv", "w") as fh:
     json.dump(args, fh)
+
+def flag_values(flag):
+    if flag not in args:
+        return []
+    values = []
+    for a in args[args.index(flag) + 1:]:
+        if a.startswith("--"):
+            break
+        values.append(a)
+    return values
+
 mode = "__MODE__"
 if mode == "fail":
     print("fake analyzer: boom", file=sys.stderr)
@@ -82,11 +107,14 @@ if mode == "garbage":
     sys.exit(0)
 if mode == "noout":
     sys.exit(0)
-exts = []
-if "--extensions" in args:
-    exts = args[args.index("--extensions") + 1:]
+exts = flag_values("--extensions")
+langs = flag_values("--languages")
 graph = json.loads("""__GRAPH__""")
 graph["meta"]["extensions"] = exts
+if langs and "languages" in graph["meta"]:
+    base = graph["meta"]["structure"]["by_lang"]["java"]
+    graph["meta"]["languages"] = langs
+    graph["meta"]["structure"]["by_lang"] = {l: dict(base) for l in langs}
 if not exts:  # structure mode: a real analyzer emits no extension-layer nodes
     graph["nodes"] = [n for n in graph["nodes"] if n["label"] != "Bean"]
     graph["edges"] = [e for e in graph["edges"] if e["label"] != "INJECTS"]
@@ -111,6 +139,13 @@ def _plain_java_repo(d: Path) -> Path:
     src = d / "src/main/java/com/x"
     src.mkdir(parents=True)
     (src / "App.java").write_text("public class App {}")
+    return d
+
+
+def _python_repo(d: Path) -> Path:
+    d.mkdir(parents=True, exist_ok=True)
+    (d / "app.py").write_text("class App:\n    def run(self):\n        return 1\n")
+    (d / "README.md").write_text("# python repo\n")
     return d
 
 
@@ -172,30 +207,103 @@ class DetectTests(unittest.TestCase):
             self.assertFalse(perceive.detect_framework(Path(d), self.manifest))
 
 
-class MarkerDetectTests(unittest.TestCase):
-    """Empty-extension degrade (spec §3): marker file + java source, no content
-    markers — the structure core runs on non-Spring Java repos."""
+class LanguageGateTests(unittest.TestCase):
+    """`structure_languages` config gate (v3 spec §7): default = every
+    shipped language; unknown values warn + are ignored (structure_extensions
+    precedent); an empty list turns the structure tier off entirely."""
 
-    def setUp(self):
-        self.manifest = json.loads((ROOT / "adapters/springboot/MANIFEST.json").read_text())
+    def test_absent_key_defaults_to_all_six(self):
+        languages, warnings = perceive.resolve_languages({})
+        self.assertEqual(languages,
+                         ["go", "java", "javascript", "python", "rust", "typescript"])
+        self.assertEqual(warnings, [])
 
-    def test_plain_java_detected_marker_only(self):
-        with TemporaryDirectory() as d:
-            d = _plain_java_repo(Path(d))
-            self.assertTrue(perceive.detect_java_marker_only(d, self.manifest))
-            # the two-stage springboot gate still rejects the same repo
-            self.assertFalse(perceive.detect_framework(d, self.manifest))
+    def test_empty_list_turns_tier_off(self):
+        languages, warnings = perceive.resolve_languages({"structure_languages": []})
+        self.assertEqual((languages, warnings), ([], []))
 
-    def test_marker_without_java_source_rejected(self):
+    def test_unknown_values_warned_and_ignored(self):
+        languages, warnings = perceive.resolve_languages(
+            {"structure_languages": ["java", "kotlin", "kotlin"]})
+        self.assertEqual(languages, ["java"])
+        self.assertEqual(len(warnings), 2)  # both kotlin occurrences
+        self.assertTrue(all("kotlin" in w and "ignored" in w for w in warnings))
+
+    def test_non_list_shape_ignored(self):
+        languages, warnings = perceive.resolve_languages({"structure_languages": "java"})
+        self.assertEqual(languages, [])
+        self.assertEqual(len(warnings), 1)
+        self.assertIn("not a list", warnings[0])
+
+
+class LanguageDetectTests(unittest.TestCase):
+    """v3 detect gate (spec 2026-10-20 §7): walk the repo once for the
+    extensions of every enabled language — the tier runs when ANY enabled
+    language has >= 1 source file. Java keeps its v2 source-root walk (spec
+    §4 java row); walk exclusions mirror the analyzer's langs.py table."""
+
+    def test_python_tree_detected(self):
         with TemporaryDirectory() as d:
             d = Path(d)
-            (d / "build.gradle").write_text("// plain gradle, no sources")
-            self.assertFalse(perceive.detect_java_marker_only(d, self.manifest))
+            (d / "app.py").write_text("print('hi')\n")
+            self.assertEqual(perceive.detect_languages(d, ["java", "python"]), ["python"])
 
-    def test_java_source_without_marker_rejected(self):
+    def test_plain_java_detected_without_marker_file(self):
+        # v3 flip: the build-marker file is no longer part of the gate —
+        # java sources under a discovered source root are enough.
         with TemporaryDirectory() as d:
-            _plain_java_repo(Path(d)).joinpath("pom.xml").unlink()
-            self.assertFalse(perceive.detect_java_marker_only(Path(d), self.manifest))
+            d = _plain_java_repo(Path(d))
+            (d / "pom.xml").unlink()
+            self.assertEqual(perceive.detect_languages(d, ["java"]), ["java"])
+
+    def test_stray_java_outside_source_roots_not_detected(self):
+        # java discovery keeps v2 semantics (spec §4: src/main/java roots),
+        # unlike the bare-suffix walk the other languages use.
+        with TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "App.java").write_text("public class App {}\n")
+            self.assertEqual(perceive.detect_languages(d, ["java"]), [])
+
+    def test_excluded_dirs_skipped(self):
+        with TemporaryDirectory() as d:
+            d = Path(d)
+            for name in ("node_modules", "__pycache__", "venv", ".venv", "dist",
+                         "build", "target", "vendor", "testdata", "out", ".git"):
+                (d / name).mkdir()
+                (d / name / "mod.py").write_text("x = 1\n")
+            self.assertEqual(perceive.detect_languages(d, ["python"]), [])
+
+    def test_python_test_trees_skipped(self):
+        with TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "tests" / "deep").mkdir(parents=True)
+            (d / "tests" / "deep" / "test_app.py").write_text("def test_x(): pass\n")
+            self.assertEqual(perceive.detect_languages(d, ["python"]), [])
+
+    def test_go_test_dirs_still_count(self):
+        # spec §4: go does NOT skip test dirs and keeps *_test.go files
+        # (in-package methods are first-class).
+        with TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "test").mkdir()
+            (d / "test" / "queue_test.go").write_text("package test\n\nfunc TestQ(t *T) {}\n")
+            self.assertEqual(perceive.detect_languages(d, ["go"]), ["go"])
+
+    def test_ruby_only_not_detected(self):
+        with TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "app.rb").write_text("class App; end\n")
+            self.assertEqual(perceive.detect_languages(d, list(perceive.KNOWN_LANGUAGES)), [])
+
+    def test_mixed_tree_all_six(self):
+        with TemporaryDirectory() as d:
+            d = Path(d)
+            (d / "src/main/java/com/x").mkdir(parents=True)
+            (d / "src/main/java/com/x/A.java").write_text("public class A {}\n")
+            for name in ("app.py", "mod.js", "widget.jsx", "api.ts", "main.go", "lib.rs"):
+                (d / name).write_text("// source\n")
+            self.assertEqual(perceive.detect_languages(d, list(perceive.KNOWN_LANGUAGES)),
+                             ["go", "java", "javascript", "python", "rust", "typescript"])
 
 
 class ExtensionTests(unittest.TestCase):
@@ -341,12 +449,33 @@ class CountsTests(unittest.TestCase):
         self.assertEqual(counts["structure"],
                          {"files": 3, "types": 3, "methods": 4, "call_edges": 2})
 
-    def test_structure_summary_wording(self):
+    def test_structure_summary_wording_multilang(self):
+        # v3 spec §7: multi-language aggregate + language list.
         st = {"files": 33, "types": 34, "methods": 52, "call_edges": 19}
-        self.assertEqual(perceive.render_structure_summary(st, "zh"),
-                         "34 个类型、52 个方法、19 条调用边")
+        self.assertEqual(perceive.render_structure_summary(st, "zh", ["java", "python"]),
+                         "33 个文件、34 个类型、52 个方法、19 条调用边（java、python）")
+        self.assertEqual(perceive.render_structure_summary(st, "en", ["java", "python"]),
+                         "33 files, 34 types, 52 methods, 19 call edges (java, python)")
+
+    def test_structure_summary_without_languages(self):
+        # v2-shaped analyzer output (no meta.languages): the wording degrades
+        # to the aggregate without the language clause — never a crash.
+        st = {"files": 3, "types": 3, "methods": 4, "call_edges": 2}
         self.assertEqual(perceive.render_structure_summary(st, "en"),
-                         "34 types, 52 methods, 19 call edges")
+                         "3 files, 3 types, 4 methods, 2 call edges")
+        self.assertEqual(perceive.render_structure_summary(st, "zh", []),
+                         "3 个文件、3 个类型、4 个方法、2 条调用边")
+
+    def test_languages_passthrough(self):
+        # counts.languages mirrors analyzer meta.languages (v3 §8); a v2-shaped
+        # graph without the key degrades to [].
+        counts = perceive.build_counts(FAKE_GRAPH)
+        self.assertEqual(counts["structure"],
+                         {"files": 7, "types": 8, "methods": 9, "call_edges": 4})
+        self.assertEqual(counts["languages"], ["java"])
+        legacy = json.loads(json.dumps(FAKE_GRAPH))
+        del legacy["meta"]["languages"]
+        self.assertEqual(perceive.build_counts(legacy)["languages"], [])
 
 
 class RunAnalyzerTests(unittest.TestCase):
@@ -405,6 +534,21 @@ class RunAnalyzerTests(unittest.TestCase):
             argv = json.loads(Path(str(out) + ".argv").read_text())
             self.assertEqual(argv, [str(repo), str(out)])
 
+    def test_languages_passed_through(self):
+        # v3 §7: perceive feeds the analyzer --languages from config ∩ detected.
+        with TemporaryDirectory() as d:
+            d = Path(d)
+            fake = _write_fake(d / "fake-analyzer", "ok")
+            repo = _plain_java_repo(d / "repo")
+            (d / "out").mkdir()
+            out = d / "out" / "structure.json"
+            with mock.patch.dict(os.environ, {"SCV_PERCEPTION_ANALYZER": str(fake)}):
+                self.assertTrue(perceive.run_analyzer(repo, out, d / "out", [], ["java"]))
+            argv = json.loads(Path(str(out) + ".argv").read_text())
+            self.assertEqual(argv, [str(repo), str(out), "--languages", "java"])
+            log = (d / "out" / "perception.log").read_text(encoding="utf-8")
+            self.assertIn("languages=['java']", log)
+
     def test_launch_error_returns_false(self):
         with TemporaryDirectory() as d:
             d = Path(d)
@@ -462,7 +606,9 @@ class EndToEndTests(unittest.TestCase):
             self.assertEqual(payload["counts"]["edges"], 2)
             self.assertEqual(payload["counts"]["structure"],
                              {"files": 7, "types": 8, "methods": 9, "call_edges": 4})
-            self.assertEqual(payload["structure_summary"], "8 types, 9 methods, 4 call edges")
+            self.assertEqual(payload["counts"]["languages"], ["java"])
+            self.assertEqual(payload["structure_summary"],
+                             "7 files, 8 types, 9 methods, 4 call edges (java)")
             self.assertEqual((out / "structure.json").read_text(encoding="utf-8")[:1], "{")
             log = (out / "perception.log").read_text(encoding="utf-8")
             self.assertIn("source=remote", log)          # --source still audited
@@ -470,6 +616,7 @@ class EndToEndTests(unittest.TestCase):
             self.assertIn("duration=", log)
             argv = json.loads(Path(str(out / "structure.json") + ".argv").read_text())
             self.assertEqual(argv[argv.index("--extensions") + 1], "springboot")
+            self.assertEqual(argv[argv.index("--languages") + 1], "java")
 
     def test_failing_fake_footnote_and_exit_zero(self):
         with TemporaryDirectory() as d:
@@ -545,7 +692,7 @@ class EndToEndTests(unittest.TestCase):
             self.assertIn("lock unavailable", log)
             self.assertIn("tier3 analyzer rc=1", log)   # and the analyzer run's tail
 
-    def test_structure_mode_marker_only_detection(self):
+    def test_structure_mode_plain_java(self):
         with TemporaryDirectory() as d:
             d = Path(d)
             fake = _write_fake(d / "fake-analyzer", "ok")
@@ -558,14 +705,19 @@ class EndToEndTests(unittest.TestCase):
             self.assertEqual(payload["status"], "ok")
             self.assertEqual(payload["counts"]["components"], 0)
             self.assertEqual(payload["counts"]["edges"], 0)
-            self.assertEqual(payload["structure_summary"], "8 types, 9 methods, 4 call edges")
+            self.assertEqual(payload["structure_summary"],
+                             "7 files, 8 types, 9 methods, 4 call edges (java)")
             log = (out / "perception.log").read_text(encoding="utf-8")
-            self.assertIn("java (marker-only)", log)
+            self.assertIn("languages=['java']", log)
             self.assertIn("extensions=[]", log)
             argv = json.loads(Path(str(out / "structure.json") + ".argv").read_text())
             self.assertNotIn("--extensions", argv)
+            self.assertEqual(argv[argv.index("--languages") + 1], "java")
 
-    def test_plain_java_is_not_framework_with_extensions_on(self):
+    def test_plain_java_with_extensions_on_runs_structure_mode(self):
+        # v3 §7 flip: extensions on but no Spring markers no longer yields
+        # not-framework — the structure tier engages, only the bean layer
+        # stays off (the springboot extension's detection is independent).
         with TemporaryDirectory() as d:
             d = Path(d)
             fake = _write_fake(d / "fake-analyzer", "ok")
@@ -574,8 +726,110 @@ class EndToEndTests(unittest.TestCase):
             res = _run_perceive(repo, out, cfg={}, env_extra={"SCV_PERCEPTION_ANALYZER": str(fake)})
             self.assertEqual(res.returncode, 0, res.stderr)
             payload = _payload(res)
+            self.assertEqual(payload["status"], "ok")
+            self.assertEqual(payload["counts"]["components"], 0)
+            self.assertEqual(payload["structure_summary"],
+                             "7 files, 8 types, 9 methods, 4 call edges (java)")
+            argv = json.loads(Path(str(out / "structure.json") + ".argv").read_text())
+            self.assertNotIn("--extensions", argv)
+            self.assertEqual(argv[argv.index("--languages") + 1], "java")
+
+    def test_python_tree_structure_mode(self):
+        # v3: a python-only repo runs the structure tier under the DEFAULT
+        # config — python is enabled by default, spring is undetected.
+        with TemporaryDirectory() as d:
+            d = Path(d)
+            fake = _write_fake(d / "fake-analyzer", "ok")
+            repo = _python_repo(d / "repo")
+            out = d / "analysis"
+            res = _run_perceive(repo, out, cfg={}, env_extra={"SCV_PERCEPTION_ANALYZER": str(fake)})
+            self.assertEqual(res.returncode, 0, res.stderr)
+            payload = _payload(res)
+            self.assertEqual(payload["status"], "ok")
+            self.assertEqual(payload["counts"]["components"], 0)
+            self.assertEqual(payload["counts"]["languages"], ["python"])
+            self.assertEqual(payload["structure_summary"],
+                             "7 files, 8 types, 9 methods, 4 call edges (python)")
+            argv = json.loads(Path(str(out / "structure.json") + ".argv").read_text())
+            self.assertNotIn("--extensions", argv)
+            self.assertEqual(argv[argv.index("--languages") + 1], "python")
+
+    def test_python_tree_with_java_only_config_is_not_framework(self):
+        # gate matrix (spec §11.5): structure_languages ["java"] on a
+        # python-only repo -> no enabled language present -> not-framework.
+        with TemporaryDirectory() as d:
+            d = Path(d)
+            fake = _write_fake(d / "fake-analyzer", "ok")
+            repo = _python_repo(d / "repo")
+            out = d / "analysis"
+            res = _run_perceive(repo, out, cfg={"structure_languages": ["java"]},
+                                env_extra={"SCV_PERCEPTION_ANALYZER": str(fake)})
+            self.assertEqual(res.returncode, 0, res.stderr)
+            payload = _payload(res)
             self.assertEqual(payload["status"], "not-framework")
+            self.assertIsNone(payload["reason"])
             self.assertFalse((out / "structure.json").exists())
+            log = (out / "perception.log").read_text(encoding="utf-8")
+            self.assertIn("tier1 detect: not-framework", log)
+
+    def test_empty_language_list_disables_tier(self):
+        # v3 §7: empty structure_languages = structure tier fully off — the
+        # same clean skip as structure_analysis_enabled=false, no footnote.
+        with TemporaryDirectory() as d:
+            d = Path(d)
+            fake = _write_fake(d / "fake-analyzer", "ok")
+            repo = _springboot_repo(d / "repo")
+            out = d / "analysis"
+            res = _run_perceive(repo, out, cfg={"structure_languages": []},
+                                env_extra={"SCV_PERCEPTION_ANALYZER": str(fake)})
+            self.assertEqual(res.returncode, 0, res.stderr)
+            payload = _payload(res)
+            self.assertEqual(payload["status"], "skipped")
+            self.assertEqual(payload["reason"], "disabled")
+            self.assertEqual(payload["footnote"], "")
+            self.assertFalse((out / "structure.json").exists())
+            log = (out / "perception.log").read_text(encoding="utf-8")
+            self.assertIn("structure_languages", log)
+
+    def test_unknown_language_warned_logged_and_ignored(self):
+        with TemporaryDirectory() as d:
+            d = Path(d)
+            fake = _write_fake(d / "fake-analyzer", "ok")
+            repo = _springboot_repo(d / "repo")
+            out = d / "analysis"
+            res = _run_perceive(repo, out,
+                                cfg={"structure_languages": ["java", "kotlin", "java"]},
+                                env_extra={"SCV_PERCEPTION_ANALYZER": str(fake)})
+            self.assertEqual(res.returncode, 0, res.stderr)
+            payload = _payload(res)
+            self.assertEqual(payload["status"], "ok")
+            log = (out / "perception.log").read_text(encoding="utf-8")
+            self.assertIn("kotlin", log)
+            self.assertIn("ignored", log)
+            argv = json.loads(Path(str(out / "structure.json") + ".argv").read_text())
+            self.assertEqual(argv[argv.index("--languages") + 1], "java")
+            self.assertNotIn("kotlin", argv)
+
+    def test_legacy_fake_without_languages_field(self):
+        # backwards compat: a v2-shaped analyzer graph (no meta.languages,
+        # no by_lang) must not crash the run — the summary degrades to the
+        # aggregate without the language clause.
+        with TemporaryDirectory() as d:
+            d = Path(d)
+            legacy = json.loads(json.dumps(FAKE_GRAPH))
+            del legacy["meta"]["languages"]
+            del legacy["meta"]["structure"]["by_lang"]
+            fake = _write_fake(d / "fake-analyzer", "ok", graph=legacy)
+            repo = _plain_java_repo(d / "repo")
+            out = d / "analysis"
+            res = _run_perceive(repo, out, cfg={"structure_extensions": []},
+                                env_extra={"SCV_PERCEPTION_ANALYZER": str(fake)})
+            self.assertEqual(res.returncode, 0, res.stderr)
+            payload = _payload(res)
+            self.assertEqual(payload["status"], "ok")
+            self.assertEqual(payload["counts"]["languages"], [])
+            self.assertEqual(payload["structure_summary"],
+                             "7 files, 8 types, 9 methods, 4 call edges")
 
     def test_unknown_extension_warned_dropped_and_logged(self):
         with TemporaryDirectory() as d:
@@ -604,6 +858,41 @@ class EndToEndTests(unittest.TestCase):
             payload = _payload(res)
             self.assertEqual(payload["status"], "skipped")
             self.assertEqual(payload["reason"], "disabled")
+
+    def test_unknown_language_logged_on_not_framework_path(self):
+        # T8 acceptance item 5 fallout (spec §7: unknown values warn into
+        # perception.log): the not-framework early return must still flush
+        # the config warnings — a typo'd language plus a repo with no
+        # enabled language must not swallow the clue.
+        with TemporaryDirectory() as d:
+            d = Path(d)
+            repo = _python_repo(d / "repo")  # python tree, java-only config
+            out = d / "analysis"
+            res = _run_perceive(repo, out,
+                                cfg={"structure_languages": ["java", "kotlin"]})
+            self.assertEqual(res.returncode, 0, res.stderr)
+            payload = _payload(res)
+            self.assertEqual(payload["status"], "not-framework")
+            log = (out / "perception.log").read_text(encoding="utf-8")
+            self.assertIn("unknown value 'kotlin'", log)
+            self.assertIn("ignored", log)
+            self.assertFalse((out / "structure.json").exists())
+
+    def test_unknown_language_logged_on_tier_off_path(self):
+        # same flush contract for the tier-off (empty-after-validation) path
+        with TemporaryDirectory() as d:
+            d = Path(d)
+            repo = _python_repo(d / "repo")
+            out = d / "analysis"
+            res = _run_perceive(repo, out,
+                                cfg={"structure_languages": ["kotlin"]})
+            self.assertEqual(res.returncode, 0, res.stderr)
+            payload = _payload(res)
+            self.assertEqual(payload["status"], "skipped")
+            self.assertEqual(payload["reason"], "disabled")
+            log = (out / "perception.log").read_text(encoding="utf-8")
+            self.assertIn("unknown value 'kotlin'", log)
+            self.assertFalse((out / "structure.json").exists())
 
 
 if __name__ == "__main__":

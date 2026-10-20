@@ -95,11 +95,18 @@ def test_graph_out_to_json_schema():
     assert payload["unresolved"] == 0
     meta = payload["meta"]
     assert meta["engine"] == "treesitter-python"
-    assert meta["languages"] == ["java"]
+    # v3 (spec 2026-10-20 §8): languages = emitted set, not a static list —
+    # an empty graph emits no languages; by_lang/import_edges are new keys,
+    # and T3 adds the Go honest-miss counter go_unverifiable_satisfaction.
+    assert meta["languages"] == []
     assert meta["extensions"] == ["springboot"]
     assert set(meta["structure"]) == {
         "files", "types", "methods", "call_edges",
-        "dropped_edges", "unresolved_refs", "key_collisions"}
+        "dropped_edges", "unresolved_refs", "key_collisions",
+        "import_edges", "go_unverifiable_satisfaction", "by_lang"}
+    assert meta["structure"]["import_edges"] == 0
+    assert meta["structure"]["go_unverifiable_satisfaction"] == 0
+    assert meta["structure"]["by_lang"] == {}
     assert meta["beans"] == 0 and meta["inject_edges"] == 0 and meta["ambiguous"] == 0
 
 
@@ -509,6 +516,93 @@ def test_references_from_new_and_cast(tmp_path):
     e = next(e for e in payload["edges"] if e["label"] == "REFERENCES"
              and e["dstKey"] == "type:com.example.calls.Tool")
     assert isinstance(e["props"]["line"], int) and e["props"]["line"] > 0
+
+
+# ---- Task 5 (v3): IMPORTS edges + lang completion (2026-10-20 §5/§8) ----
+
+def test_imports_single_type_import_resolving_in_source(tmp_path):
+    """Single-type imports resolving to in-source types -> IMPORTS edges to
+    the declaring files (same package AND cross package); wildcard (even of
+    an in-repo package), static, and external imports -> no edge, no count
+    (spec §5 java column + rev3 counting ruling)."""
+    repo = build_repo(tmp_path, {
+        "src/main/java/com/example/app/Alpha.java": (
+            "package com.example.app;\n"
+            "import com.example.app.Beta;\n"
+            "import com.example.util.Gamma;\n"
+            "import com.example.util.*;\n"
+            "import java.util.List;\n"
+            "import static com.example.model.Delta.NAME;\n"
+            "public class Alpha {\n"
+            "    Beta b;\n"
+            "    Gamma g;\n"
+            "}\n"
+        ),
+        "src/main/java/com/example/app/Beta.java": (
+            "package com.example.app;\npublic class Beta {}\n"
+        ),
+        "src/main/java/com/example/util/Gamma.java": (
+            "package com.example.util;\npublic class Gamma {}\n"
+        ),
+    })
+    _out, payload = run_extract(repo)
+    alpha = "file:src/main/java/com/example/app/Alpha.java"
+    assert edge_set(payload, "IMPORTS") == {
+        (alpha, "file:src/main/java/com/example/app/Beta.java"),
+        (alpha, "file:src/main/java/com/example/util/Gamma.java"),
+    }
+    st = payload["meta"]["structure"]
+    assert st["import_edges"] == 2
+    assert st["dropped_edges"] == 0
+    assert st["unresolved_refs"] == 0
+
+
+def test_imports_no_edge_without_import_or_external_only(tmp_path):
+    """Same-package use without an import statement -> no IMPORTS edge (the
+    edge is import-driven only); external imports alone -> no edge, and the
+    honest counters are untouched (rev3 ruling: external = no count)."""
+    repo = build_repo(tmp_path, {
+        "src/main/java/com/example/app/NoImp.java": (
+            "package com.example.app;\n"
+            "public class NoImp {\n"
+            "    Buddy buddy;\n"
+            "}\n"
+        ),
+        "src/main/java/com/example/app/Buddy.java": (
+            "package com.example.app;\n"
+            "import java.util.List;\n"
+            "public class Buddy {}\n"
+        ),
+    })
+    _out, payload = run_extract(repo)
+    assert edge_set(payload, "IMPORTS") == set()
+    st = payload["meta"]["structure"]
+    assert st["import_edges"] == 0
+    assert st["dropped_edges"] == 0
+    assert st["unresolved_refs"] == 0
+
+
+def test_java_nodes_carry_lang_and_by_lang(tmp_path):
+    """Type/Method gain props.lang; File writes both language and lang (§8);
+    by_lang.java flips from files-only to full counts (T5 completion)."""
+    repo = build_repo(tmp_path, {
+        "src/main/java/com/example/lang/Solo.java": (
+            "package com.example.lang;\n"
+            "public class Solo {\n"
+            "    void m() {}\n"
+            "}\n"
+        ),
+    })
+    _out, payload = run_extract(repo)
+    for n in payload["nodes"]:
+        if n["label"] == "File":
+            assert n["props"].get("language") == "java", n["key"]
+            assert n["props"].get("lang") == "java", n["key"]
+        else:
+            assert n["props"].get("lang") == "java", n["key"]
+    assert payload["meta"]["languages"] == ["java"]
+    assert payload["meta"]["structure"]["by_lang"] == {
+        "java": {"files": 1, "types": 1, "methods": 1, "call_edges": 0}}
 
 
 # ---- frozen fixture smoke (spec §8.3 structure bounds) ----

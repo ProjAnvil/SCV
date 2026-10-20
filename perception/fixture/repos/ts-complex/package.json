@@ -1,0 +1,8 @@
+{
+  "name": "ts-complex",
+  "private": true,
+  "description": "Perception fixture: TypeScript + JavaScript mixed tree",
+  "scripts": {
+    "build": "tsc"
+  }
+}
