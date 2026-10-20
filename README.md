@@ -28,6 +28,7 @@
 
 - 🔄 **Remote Repository Management**: Clone, update, and manage remote Git repositories
 - 📊 **Deep Code Analysis**: Generate comprehensive documentation for any codebase
+- 🧭 **Deep Structural Analysis**: Extract a queryable structure graph (files, types, methods, call/import/implements edges) from Java, Python, JavaScript, TypeScript, Go, and Rust codebases
 - 🚀 **Parallel Processing**: Analyze multiple repositories simultaneously with subagents
 - ⚡ **Incremental Analysis**: Skip repos whose HEAD commit hasn't changed since last analysis
 - 🔍 **Deep Analysis Mode**: Token-efficient code exploration with [codebones](https://github.com/creynir/codebones) integration
