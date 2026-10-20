@@ -37,6 +37,8 @@ class LanguageSpec:
 _LANGUAGE_SPECS: dict[str, LanguageSpec] = {
     "java": LanguageSpec("java", (".java",), skip_test_dirs=False),
     "python": LanguageSpec("python", (".py",)),
+    "javascript": LanguageSpec("javascript", (".js", ".jsx", ".mjs", ".cjs")),
+    "typescript": LanguageSpec("typescript", (".ts", ".tsx", ".mts", ".cts")),
 }
 
 
