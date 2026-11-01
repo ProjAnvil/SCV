@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [v0.13.0] - 2026-11-01
+
+### Changed
+- **vectra upgraded v0.6.0 → v0.14.4** (both `perception/loader` and `perception/graphmcp`). Every API SCV uses kept its v0.6 signature (`New/AddNode/UpsertEdge/IndexProperty/Seal/SaveFile/LoadFile/Cycles/NodeByID/NodeByKey/EdgeCount/Stats/Cypher`, `Node`/`Edge`/`Cycle`), so the upgrade is source-invisible; snapshots written by the new version stamp store v8 and old (store v3) snapshots still load. SCV inherits vectra's v0.9–v0.11 performance arc (3.6x ingest at 1M scale, allocation-free query paths) for loader builds and graphmcp serving.
+
+### Added
+- **Full-text indexes on `name`/`path`** (vectra v0.12 FTS + v0.13.1 `CONTAINS` pushdown): the loader declares bigram full-text indexes over the two properties agents fuzzy-search most, so `WHERE n.name CONTAINS '...'` and `WHERE n.path CONTAINS '...'` narrow through the gram buckets instead of scanning every node. Semantics identical with or without the declaration; undeclared keys keep scanning. Covered by `TestSnapshotFullTextIndexes` (declaration survives the SaveFile→LoadFile roundtrip; CONTAINS answers unchanged).
+- **`impact` tool in `scv-graph-mcp`** (vectra v0.7 `Reachable`): transitive blast-radius analysis from one node — `direction=out` (default) answers "what does changing X affect", `direction=in` answers "what does X depend on", optionally filtered by edge labels (`INJECTS`, `CALLS`, ...). Start node excluded from the reported set; covered by `TestImpact` (ring + CALLS-tail fixture: direction, label isolation, limit/total accounting, unknown node/repo errors).
+- `scv-graph-mcp`'s `cypher` tool description now documents the wider clause set (`WITH`, `UNWIND`, `OPTIONAL MATCH` — vectra v0.13) and the full-text `CONTAINS` behavior.
+
+### Evaluation
+- Regression green on vectra v0.14.4: loader Go tests · graphmcp Go tests · analyzer pytest **193** · perception integration suite **70** · fixture check **OK** (9 repos incl. the Spring Boot fatal/tolerated cycle expectations).
+
 ## [v0.12.0] - 2026-10-20
 
 ### Added
