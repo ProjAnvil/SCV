@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
+	"sort"
 	"testing"
 
 	"github.com/projanvil/vectra"
@@ -191,6 +193,44 @@ func TestLoadMultiLangSnapshot(t *testing.T) {
 	}
 	if e, ok := call.Rows[0]["e"].(vectra.Edge); !ok || e.Props["kind"] != "direct" || fmt.Sprint(e.Props["line"]) != "10" {
 		t.Fatalf("CALLS props lost: %+v", call.Rows[0]["e"])
+	}
+}
+
+// TestSnapshotFullTextIndexes: the loader declares bigram full-text indexes
+// over name/path (the properties agents fuzzy-search most), the declarations
+// survive the SaveFile→LoadFile roundtrip, and CONTAINS filters answer
+// identically on the reloaded snapshot — with the gram-bucket prefilter in
+// front of the mandatory case-sensitive re-check (vectra v0.12 FTS).
+func TestSnapshotFullTextIndexes(t *testing.T) {
+	gr, _ := loadGraph(writeFixture(t, multiLangDoc))
+	vg := filepath.Join(t.TempDir(), "structure.vg")
+	if err := gr.SaveFile(vg); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := vectra.LoadFile(vg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := loaded.FullTextIndexedKeys()
+	sort.Strings(got)
+	if want := []string{"name", "path"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("full-text keys: got %v want %v", got, want)
+	}
+
+	byName, err := loaded.Cypher(`MATCH (n) WHERE n.name CONTAINS 'oa' RETURN n.key`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 'load' contains 'oa'; 'get' does not
+	if len(byName.Rows) != 1 || byName.Rows[0]["n.key"] != "fn:lib.api::API#load(n)" {
+		t.Fatalf("name CONTAINS 'oa': %+v", byName.Rows)
+	}
+	byPath, err := loaded.Cypher(`MATCH (n) WHERE n.path CONTAINS 'app' RETURN n.key`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(byPath.Rows) != 1 || byPath.Rows[0]["n.key"] != "file:src/app.ts" {
+		t.Fatalf("path CONTAINS 'app': %+v", byPath.Rows)
 	}
 }
 

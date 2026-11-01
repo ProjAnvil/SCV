@@ -29,11 +29,18 @@ baseline; java flow and artifact contract unchanged).
   below); new edge labels (CALLS from new languages, IMPORTS) can never
   reach the user cycle summary. No `lang` property index is needed —
   snapshot `{prop}` anchors fall back to a node scan for unindexed keys
-  (vectra v0.6), so `MATCH (n {lang:'python'})` answers from v3 snapshots
-  as-is (T7 spike, 2026-10-20).
+  (unchanged behavior since the v0.6 era), so `MATCH (n {lang:'python'})`
+  answers from snapshots as-is (T7 spike, 2026-10-20). Since vectra v0.14
+  the loader also declares bigram full-text indexes over `name`/`path`,
+  so `WHERE n.name CONTAINS '...'` / `WHERE n.path CONTAINS '...'` hit
+  the gram buckets instead of a node scan (semantics identical either
+  way; undeclared keys keep scanning).
 - `graphmcp/` — Go MCP server over every `~/.scv/analysis/*/structure.vg`;
   its cypher tool description documents the full node/edge surface
-  (including `lang` filtering and IMPORTS traversal examples).
+  (including `lang` filtering and IMPORTS traversal examples), and the
+  `impact` tool (vectra `Reachable`, added with the v0.14.4 upgrade)
+  answers blast-radius questions: everything reachable from a node,
+  direction and edge-label filtered.
 - `adapters/springboot/` — the Spoon engine, **repositioned as the
   cross-validation engine**: repo/test-time only, NOT shipped by install.sh,
   NOT on the run path. Its 5-fixture suite stays the ground truth.

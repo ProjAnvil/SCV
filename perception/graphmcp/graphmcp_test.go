@@ -118,6 +118,104 @@ func TestUnknownRepoError(t *testing.T) {
 	}
 }
 
+// buildImpactVG writes a bean ring plus a CALLS tail so impact's direction
+// and label filters are assertable: a→b→c→a over INJECTS, c→y and x→y over
+// CALLS.
+func buildImpactVG(t *testing.T, path string) {
+	t.Helper()
+	g := vectra.New()
+	g.AddNode("bean:a", "Bean", map[string]any{"beanName": "a"})
+	g.AddNode("bean:b", "Bean", map[string]any{"beanName": "b"})
+	g.AddNode("bean:c", "Bean", map[string]any{"beanName": "c"})
+	g.AddNode("fn:x", "Method", map[string]any{"name": "x"})
+	g.AddNode("fn:y", "Method", map[string]any{"name": "y"})
+	g.UpsertEdge("bean:a", "bean:b", "INJECTS", map[string]any{})
+	g.UpsertEdge("bean:b", "bean:c", "INJECTS", map[string]any{})
+	g.UpsertEdge("bean:c", "bean:a", "INJECTS", map[string]any{})
+	g.UpsertEdge("bean:c", "fn:y", "CALLS", map[string]any{})
+	g.UpsertEdge("fn:x", "fn:y", "CALLS", map[string]any{})
+	if err := g.Seal(); err != nil {
+		t.Fatal(err)
+	}
+	if err := g.SaveFile(path); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func impactKeySet(nodes []impactNode) map[string]bool {
+	set := map[string]bool{}
+	for _, n := range nodes {
+		set[n.Key] = true
+	}
+	return set
+}
+
+// TestImpact covers the impact tool (vectra v0.7 Reachable): transitive
+// blast radius with direction and edge-label filters, start node excluded,
+// and unknown-node/unknown-repo errors.
+func TestImpact(t *testing.T) {
+	dir := t.TempDir()
+	os.MkdirAll(filepath.Join(dir, "alpha"), 0o755)
+	buildImpactVG(t, filepath.Join(dir, "alpha", "structure.vg"))
+	svc := &service{store: newStore(dir)}
+	if err := svc.store.rescan(); err != nil {
+		t.Fatal(err)
+	}
+
+	run := func(t *testing.T, in impactIn) map[string]any {
+		t.Helper()
+		_, out, err := svc.impact(context.Background(), nil, in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out.(map[string]any)
+	}
+
+	// out from a over INJECTS: the rest of the ring (b, c), start excluded
+	res := run(t, impactIn{Repo: "alpha", Key: "bean:a", Labels: []string{"INJECTS"}})
+	if got := impactKeySet(res["nodes"].([]impactNode)); len(got) != 2 || !got["bean:b"] || !got["bean:c"] {
+		t.Fatalf("out from a over INJECTS: %v", got)
+	}
+
+	// out from a unfiltered: INJECTS ring plus the CALLS tail from c
+	res = run(t, impactIn{Repo: "alpha", Key: "bean:a"})
+	got := impactKeySet(res["nodes"].([]impactNode))
+	for _, want := range []string{"bean:b", "bean:c", "fn:y"} {
+		if !got[want] {
+			t.Fatalf("out from a unfiltered: %v missing %s", got, want)
+		}
+	}
+	if got["fn:x"] || got["bean:a"] {
+		t.Fatalf("out from a unfiltered: unexpected members %v", got)
+	}
+
+	// in to y: both c and x reach it
+	res = run(t, impactIn{Repo: "alpha", Key: "fn:y", Direction: "in"})
+	got = impactKeySet(res["nodes"].([]impactNode))
+	if len(got) != 4 || got["fn:y"] { // a, b, c, x — everything but y
+		t.Fatalf("in to y: %v", got)
+	}
+
+	// label isolation: out from x over CALLS reaches only y
+	res = run(t, impactIn{Repo: "alpha", Key: "fn:x", Labels: []string{"CALLS"}})
+	if got := impactKeySet(res["nodes"].([]impactNode)); len(got) != 1 || !got["fn:y"] {
+		t.Fatalf("out from x over CALLS: %v", got)
+	}
+
+	// limit truncates but reports the true total
+	res = run(t, impactIn{Repo: "alpha", Key: "bean:a", Limit: 1})
+	if len(res["nodes"].([]impactNode)) != 1 || res["count"].(int) != 1 || res["total"].(int) != 3 {
+		t.Fatalf("limit: %+v", res)
+	}
+
+	if _, _, err := svc.impact(context.Background(), nil, impactIn{Repo: "alpha", Key: "bean:ghost"}); err == nil {
+		t.Fatal("expected error for unknown node")
+	}
+	if _, _, err := svc.impact(context.Background(), nil, impactIn{Repo: "nope", Key: "bean:a"}); err == nil {
+		t.Fatal("expected error for unknown repo")
+	}
+}
+
 func TestCypherServesFromSnapshotIndexes(t *testing.T) {
 	// v3 snapshots persist index declarations: a freshly loaded snapshot must
 	// answer property-anchored Cypher without any re-registration (the bug we

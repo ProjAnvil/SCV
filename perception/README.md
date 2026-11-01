@@ -63,8 +63,10 @@ information back:
 claude mcp add scv-graph -- ~/.scv/perception/dist/graphmcp/scv-graph-mcp
 ```
 
-MCP tools: `repos` (list analyzed repositories), `cypher(repo, query)`,
-`get_node(repo, key)`, `refresh`.
+MCP tools: `repos` (list analyzed repositories), `cypher(repo, query)` —
+now including `WITH`, `UNWIND`, `OPTIONAL MATCH` and full-text-indexed
+`CONTAINS` on `name`/`path` — `impact(repo, key, direction?, labels?)`
+(transitive blast radius from one node), `get_node(repo, key)`, `refresh`.
 
 Two node surfaces live in the same graph:
 

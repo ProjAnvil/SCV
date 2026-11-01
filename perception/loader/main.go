@@ -65,6 +65,14 @@ func loadGraph(jsonPath string) (*vectra.Graph, int) {
 	for _, k := range []string{"stereotype", "beanName", "type", "conditions"} {
 		gr.IndexProperty(k)
 	}
+	// Bigram full-text indexes over the two properties agents fuzzy-search
+	// most (method names, file paths): Cypher `WHERE n.x CONTAINS '...'`
+	// narrows through the gram buckets instead of scanning every node
+	// (vectra v0.12 FTS + v0.13.1 CONTAINS pushdown). Semantics are the
+	// same with or without the declaration; undeclared keys keep scanning.
+	for _, k := range []string{"name", "path"} {
+		gr.IndexFullText(k)
+	}
 	for _, n := range g.Nodes {
 		_, err := gr.AddNode(n.Key, n.Label, n.Props)
 		must(err)

@@ -214,6 +214,71 @@ func (svc *service) getNode(_ context.Context, _ *mcp.CallToolRequest, in nodeIn
 	return nil, map[string]any{"key": n.Key, "label": n.Label, "props": n.Props}, nil
 }
 
+type impactIn struct {
+	Repo      string   `json:"repo"`
+	Key       string   `json:"key" jsonschema:"start node key, e.g. bean:orderController"`
+	Direction string   `json:"direction,omitempty" jsonschema:"out (default): everything reachable via outgoing edges — what changing this node affects; in: via incoming edges — everything this node depends on"`
+	Labels    []string `json:"labels,omitempty" jsonschema:"optional edge-label filter, e.g. [\"INJECTS\"] or [\"CALLS\",\"IMPORTS\"]"`
+	Limit     int      `json:"limit,omitempty" jsonschema:"max nodes returned, default 1000"`
+}
+
+type impactNode struct {
+	Key   string `json:"key"`
+	Label string `json:"label"`
+}
+
+// impact is blast-radius analysis over the sealed graph (vectra v0.7
+// Reachable): transitive closure from one node, optionally along one edge
+// label family. Edges point dependency-first (INJECTS A→B: A injects B), so
+// direction=out answers "what does changing X affect" and direction=in
+// answers "what does X (transitively) depend on".
+func (svc *service) impact(_ context.Context, _ *mcp.CallToolRequest, in impactIn) (*mcp.CallToolResult, any, error) {
+	g, err := svc.store.graph(in.Repo)
+	if err != nil {
+		return nil, nil, err
+	}
+	if _, ok := g.NodeByKey(in.Key); !ok {
+		return nil, nil, fmt.Errorf("node %q not found in repo %q", in.Key, in.Repo)
+	}
+	dir := vectra.DirOut
+	if in.Direction == "in" {
+		dir = vectra.DirIn
+	}
+	opts := []vectra.ReachOption{vectra.ReachWithDirection(dir)}
+	if len(in.Labels) > 0 {
+		opts = append(opts, vectra.ReachWithLabels(in.Labels...))
+	}
+	keys, err := g.Reachable(in.Key, opts...)
+	if err != nil {
+		return nil, nil, err
+	}
+	// Reachable includes the start node; the blast radius does not.
+	filtered := make([]string, 0, len(keys))
+	for _, k := range keys {
+		if k != in.Key {
+			filtered = append(filtered, k)
+		}
+	}
+	limit := in.Limit
+	if limit <= 0 || limit > defaultRowLimit {
+		limit = defaultRowLimit
+	}
+	total := len(filtered)
+	if len(filtered) > limit {
+		filtered = filtered[:limit]
+	}
+	nodes := make([]impactNode, 0, len(filtered))
+	for _, k := range filtered {
+		if n, ok := g.NodeByKey(k); ok {
+			nodes = append(nodes, impactNode{Key: n.Key, Label: n.Label})
+		}
+	}
+	return nil, map[string]any{
+		"start": in.Key, "direction": in.Direction, "nodes": nodes,
+		"count": len(nodes), "total": total,
+	}, nil
+}
+
 func (svc *service) refresh(_ context.Context, _ *mcp.CallToolRequest, _ any) (*mcp.CallToolResult, any, error) {
 	if err := svc.store.rescan(); err != nil {
 		return nil, nil, err
@@ -239,6 +304,8 @@ func newServer(svc *service) *mcp.Server {
 			"Method (key 'fn:<fqn>#<name>(<params>)', props: name, visibility, static, params, returns, owner (Type key), loc); " +
 			"File (key 'file:<repo-relative path>', props: path, language, loc). " +
 			"Multi-language repositories: Type/Method nodes carry props.lang and File nodes carry language + lang (values e.g. java, python, javascript, typescript, go, rust) — filter with MATCH (n {lang:'python'}) RETURN n. " +
+			"Clauses: MATCH, WHERE, RETURN, ORDER BY, SKIP/LIMIT, WITH, UNWIND and OPTIONAL MATCH are supported; " +
+			"WHERE n.name CONTAINS 'x' and WHERE n.path CONTAINS 'x' are full-text indexed (bigram), other keys scan. " +
 			"Edge labels: INJECTS (Bean→Bean, props via/qualifier/wraps/ambiguous); " +
 			"CALLS (Method→Method, props line, kind direct|virtual-dispatch); " +
 			"IMPORTS (File→File, cross-file dependency); " +
@@ -255,6 +322,15 @@ func newServer(svc *service) *mcp.Server {
 		Name: "get_node", Description: "Full node info (key, label, props) by repo + key.",
 		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
 	}, svc.getNode)
+	mcp.AddTool(s, &mcp.Tool{
+		Name: "impact",
+		Description: "Blast-radius analysis: every node transitively reachable from a start node. " +
+			"direction=out (default) follows outgoing edges — what changing this node affects " +
+			"(e.g. impact of bean:orderMailer with labels [\"INJECTS\"]); " +
+			"direction=in follows incoming edges — everything this node depends on. " +
+			"Optionally filter by edge labels (INJECTS, CALLS, IMPORTS, IMPLEMENTS, EXTENDS, CONTAINS, REFERENCES).",
+		Annotations: &mcp.ToolAnnotations{ReadOnlyHint: true},
+	}, svc.impact)
 	mcp.AddTool(s, &mcp.Tool{
 		Name: "refresh", Description: "Rescan the analysis directory for new structure.vg files (after a new /scv run).",
 	}, svc.refresh)
