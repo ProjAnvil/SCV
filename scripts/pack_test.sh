@@ -59,7 +59,10 @@ check_has "dist/$platform/graphmcp/scv-graph-mcp"
 # adapter sources, none of which may enter the tarball.
 if grep -q '\.venv' <<<"$listing"; then fail "tarball contains .venv"; fi
 if grep -q '__pycache__' <<<"$listing"; then fail "tarball contains __pycache__"; fi
-check_not "adapters/springboot/src"
+# A directory exclusion must match the anchored prefix: the tar listing
+# renders the dir with a trailing slash and its files as longer paths,
+# so a whole-line match here could never fire.
+if grep -qE '^adapters/springboot/src(/|$)' <<<"$listing"; then fail "tarball contains adapters/springboot/src"; fi
 check_not "adapters/springboot/README.md"
 check_not "adapters/springboot/build.gradle"
 
