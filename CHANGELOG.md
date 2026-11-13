@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **SCV engine v1 — Go control plane over the perception toolchain** (`engine/`, module `github.com/projanvil/scv/engine`): a one-shot `scv` CLI that drives `perceive.py` with durable job records, replacing ad-hoc perception invocations for hosts that need machine-readable progress.
+  - **`scv run <source>`** — the full pipeline (checking → preparing → skip-check → perceive → generating → finalizing) over a git URL (cloned), a local git worktree (linked), or a local directory (analyzed in place); **`scv jobs list/status/events/cancel`** — job inspection and external cancellation through the recorded process group; **`scv repo clone/link/pull/list/remove`** — repos-entry management under `~/.scv/repos`; **`scv query cypher/node/impact`** — vectra queries over every registered analysis dir (`~/.scv/analysis-dirs.json`); **`scv env`** — the environment snapshot and dependency diagnostics (always exit 0)
+  - **NDJSON run contract** — `scv run` stdout is one event object per line with the exact schema of the job's durable `events.jsonl` (`id/seq/ts/type/stage/detail/error`, snake_case), ending with the terminal `job_result` line; human diagnostics go to stderr and a documented exit-code table (0 ok/degraded/skipped, 2 usage, 3 version handshake, 4–10 typed run paths) maps every failure
+  - **Unified dependency gate** — one checking-stage verdict (blocking vs degrading) shared by `scv run` and `scv env`: python3/git/perception-root/uv classify blocking per mode, a missing Go toolchain degrades only when the prebuilt dist loader is absent too (binary-OR-toolchain), llm-unconfigured and deep-analysis report as degrading; every missing item is listed at once with repair hints
+  - **Command-mode doc generation** — a config `llm` section (`command`/`timeout_s`/`retry`) wires an external LLM command invoked once per document (readme → summary → architecture → file_index) with the §8 env-var contract (no argv values, no engine-side key custody), per-attempt events, retries, timeout group-kill, and typed `DOCGEN_FAILED`/`STAGE_TIMEOUT` failures; the `supervisor` package gives embedding hosts the same runs asynchronously
+  - **`make pack`** (scripts/pack.sh) — release artifacts: `perception-runtime-<ver>.tar.gz` (whitelist-packed runtime with prebuilt `dist/<platform>/` loader+graphmcp pairs and a docgen assets mirror) and statically linked `scv-<ver>-<os>-<arch>` engine binaries, their `--version` stamped from this changelog at build time
+  - **perceive.py additions** — `--version` handshake (`scv_version`/`contract`, compared by major), tier-start log lines the engine maps to live stage events, the prebuilt-binary freshness gate, and the O_EXCL build lock around dist builds
+
 ## [v0.13.0] - 2026-11-01
 
 ### Changed

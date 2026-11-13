@@ -101,8 +101,12 @@ for platform in $platforms; do
   CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
     go build -C perception/graphmcp -o "$stage_abs/dist/$platform/graphmcp/scv-graph-mcp" .
   echo "pack: building engine scv-$ver-$os-$arch"
+  # -X stamps the CHANGELOG-derived version over main.engineVersion's
+  # "dev" fallback, so `scv --version` on a shipped binary reports the
+  # same version its artifact name carries.
   CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" \
-    go build -C engine -o "$outdir_abs/scv-$ver-$os-$arch" ./cmd/scv
+    go build -C engine -ldflags "-X main.engineVersion=$ver" \
+    -o "$outdir_abs/scv-$ver-$os-$arch" ./cmd/scv
 done
 
 # The runtime tarball is cut from the staged whitelist (explicit

@@ -46,14 +46,26 @@ const (
 // section 12). contractMin/contractMax are compared by major version
 // only: additive minor evolution never breaks the handshake.
 const (
-	engineVersion = "0.1.0"
-	contractMin   = "1.0"
-	contractMax   = "1.x"
+	contractMin = "1.0"
+	contractMax = "1.x"
 )
 
-// versionJSON is the documented `scv --version` output: one JSON object
-// with the engine version and the supported perceive contract range.
-const versionJSON = `{"engine":"` + engineVersion + `","contract_min":"` + contractMin + `","contract_max":"` + contractMax + `"}`
+// engineVersion is the engine identity reported by `scv --version`.
+// Release binaries are stamped at pack time: scripts/pack.sh builds with
+// -ldflags "-X main.engineVersion=<ver>", taking <ver> from the first
+// released "## [vX.Y.Z]" heading in CHANGELOG.md — the same version the
+// artifact names carry. Unstamped builds (go build in a checkout, test
+// binaries) report the "dev" fallback below.
+var engineVersion = "dev"
+
+// versionJSON renders the documented `scv --version` output: one JSON
+// object with the engine version and the supported perceive contract
+// range. A function, not a constant, because engineVersion is a
+// link-time variable.
+func versionJSON() string {
+	return fmt.Sprintf(`{"engine":%q,"contract_min":%q,"contract_max":%q}`,
+		engineVersion, contractMin, contractMax)
+}
 
 // options carries the global flags shared by every subcommand.
 type options struct {
@@ -140,10 +152,10 @@ func newRootCmd() *cobra.Command {
 	root := &cobra.Command{
 		Use:          "scv",
 		Short:        "SCV engine — Go control plane over the perception toolchain",
-		Version:      versionJSON,
+		Version:      versionJSON(),
 		SilenceUsage: true, // runtime failures are not usage errors
 	}
-	root.SetVersionTemplate(versionJSON + "\n")
+	root.SetVersionTemplate(versionJSON() + "\n")
 
 	pf := root.PersistentFlags()
 	pf.StringVar(&opts.scvHome, "scv-home", "", "scv home directory (default $SCV_HOME, else ~/.scv)")
