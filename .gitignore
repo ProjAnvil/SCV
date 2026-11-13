@@ -1,2 +1,4 @@
 .DS_Store
 .worktrees/
+dist-release/
+perception/docgen/

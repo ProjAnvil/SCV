@@ -34,7 +34,7 @@ eval-clean: ## remove generated reports
 
 # Engine (Go control plane) — delegated to engine/Makefile.
 
-.PHONY: engine-build engine-test engine-test-integration
+.PHONY: engine-build engine-test engine-test-integration pack
 
 engine-build: ## build the Go engine
 	$(MAKE) -C engine build
@@ -44,3 +44,6 @@ engine-test: ## engine unit tests + coverage gate (>=80% on engine/internal/...)
 
 engine-test-integration: ## engine integration tests (real perception fixtures; wired by a later task)
 	$(MAKE) -C engine test-integration
+
+pack: engine-build ## build release artifacts: runtime tarball + engine binaries (scripts/pack.sh)
+	bash scripts/pack.sh
