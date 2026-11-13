@@ -65,11 +65,13 @@ type GateResult struct {
 //   - uv when Mode.Structure (structure output is expected).
 //
 // Degrading:
-//   - go toolchain and prebuilt loader both absent with Mode.Query —
-//     the query tier is turned off. Only the loader matters here: it
-//     produces the structure.vg the query tier consumes, while the
-//     graphmcp binary serves external MCP consumers (spec section 12,
-//     binary-OR-toolchain);
+//   - go toolchain and prebuilt loader both absent — the query tier is
+//     turned off. Controller ruling: this item fires regardless of mode
+//     (the brief qualifies uv and docgen with mode flags and leaves the
+//     go rule unqualified, like deep-analysis below). Only the loader
+//     matters here: it produces the structure.vg the query tier
+//     consumes, while the graphmcp binary serves external MCP consumers
+//     (spec section 12, binary-OR-toolchain);
 //   - llm unconfigured with Mode.DocGen — docgen is turned off;
 //   - deep_analysis_enabled — unsupported in engine v1, regardless of
 //     mode.
@@ -95,7 +97,7 @@ func (e *Env) Gate(m Mode, cfg *config.Config) GateResult {
 			"install uv — https://docs.astral.sh/uv/"))
 	}
 
-	if m.Query && toolMissing(e.Go) && !e.PrebuiltLoader {
+	if toolMissing(e.Go) && !e.PrebuiltLoader {
 		result.Degrading = append(result.Degrading, degradingItem("go", CapabilityQuery,
 			"install Go 1.27+ or ship the prebuilt dist binaries"))
 	}

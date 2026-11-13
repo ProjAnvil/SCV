@@ -129,15 +129,25 @@ func TestGateDegradingQueryOff(t *testing.T) {
 		}
 	})
 
-	t.Run("query capability not requested", func(t *testing.T) {
-		env := completeEnv(t)
-		env.Go = nil
-		env.PrebuiltLoader = false
+	t.Run("degrades regardless of requested mode", func(t *testing.T) {
+		// Controller ruling: unlike uv (Structure) and docgen (DocGen),
+		// the go/dist rule is unqualified — the item fires for any mode,
+		// including a zero Mode.
+		for _, mode := range []Mode{{Structure: true}, {}, {DocGen: true}} {
+			env := completeEnv(t)
+			env.Go = nil
+			env.PrebuiltLoader = false
+			// LLM configured so the DocGen case isolates the go item.
+			cfg := &config.Config{LLM: &config.LLM{Mode: "command"}}
 
-		res := env.Gate(Mode{Structure: true}, &config.Config{})
+			res := env.Gate(mode, cfg)
 
-		if len(res.Degrading) != 0 {
-			t.Errorf("Degrading = %v, want empty: the query tier is not part of this run", itemNames(res.Degrading))
+			if want := []string{"go"}; !slices.Equal(itemNames(res.Degrading), want) {
+				t.Errorf("Degrading for mode %+v = %v, want %v (mode-independent)", mode, itemNames(res.Degrading), want)
+			}
+			if item := findItem(t, res.Degrading, "go"); item.Capability != CapabilityQuery {
+				t.Errorf("go capability for mode %+v = %q, want %q", mode, item.Capability, CapabilityQuery)
+			}
 		}
 	})
 
