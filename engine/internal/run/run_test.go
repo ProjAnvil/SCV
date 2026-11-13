@@ -38,6 +38,8 @@ const stubPerceiveScript = `#!/usr/bin/env python3
   exit3           - no logs at all, process exits 3
   garbage         - junk log lines (no tier lines), non-JSON stdout
   sleep           - logs nothing, sleeps 30s (cancellation target)
+  spawner         - spawns a sleeper grandchild, records both pids to
+                    .stub-pids.json, then sleeps 30s (T9 group-kill target)
 """
 import json, os, sys, time
 
@@ -64,6 +66,17 @@ if mode == "garbage":
     print("this is not json {")
     sys.exit(0)
 if mode == "sleep":
+    time.sleep(30)
+    print("{}")
+    sys.exit(0)
+if mode == "spawner":
+    # T9: a grandchild that outlives a child-only kill (it inherits the
+    # stdout pipe); .stub-pids.json lets tests assert the whole group
+    # died when the run was cancelled.
+    import subprocess
+    child = subprocess.Popen(["sleep", "60"])
+    with open(os.path.join(ad, ".stub-pids.json"), "w", encoding="utf-8") as fh:
+        json.dump({"self": os.getpid(), "child": child.pid}, fh)
     time.sleep(30)
     print("{}")
     sys.exit(0)

@@ -25,6 +25,11 @@ const logTailLimit = 2000
 // for new tier lines while perceive.py runs.
 const tailPollInterval = 200 * time.Millisecond
 
+// perceiveWaitDelay bounds cmd.Wait after the process-group kill (the
+// docgen waitDelay backstop): a straggler that escaped the group but
+// kept the stdout pipe open cannot hang the pipeline's Wait.
+const perceiveWaitDelay = 2 * time.Second
+
 // testPerceiveEnv names the perceive path override. It exists so engine
 // unit tests (this package, T10, T12) can point the pipeline at a stub
 // perceive script instead of the real runtime — see perceivePath.
@@ -97,6 +102,12 @@ func runPerceiveStage(ctx context.Context, em *emitter, cfg *config.Config, e *e
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
+	// T9 process groups (spec section 10): perceive leads its own group
+	// and a context cancel SIGKILLs the whole group — a grandchild
+	// holding the stdout pipe survives a child-only kill and would keep
+	// Wait's copy loop draining forever.
+	cmd.WaitDelay = perceiveWaitDelay
+	setChildProcessGroup(cmd)
 
 	if err := cmd.Start(); err != nil {
 		return nil, analyzerFailure(em, tracker, "", fmt.Sprintf("start perceive: %v", err))

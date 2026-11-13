@@ -123,6 +123,13 @@ func runPipeline(ctx context.Context, cfg *config.Config, req RunRequest, sink f
 	if err != nil {
 		return nil, fmt.Errorf("run: create job: %w", err)
 	}
+	// Spec section 10: lead our own process group and record it on the
+	// job, so `jobs cancel` can signal the whole run tree.
+	SetProcessGroup()
+	j.Pid = os.Getpid() // own pgid after SetProcessGroup
+	if err := j.Snapshot(jobDir); err != nil {
+		return nil, fmt.Errorf("run: record owning pid: %w", err)
+	}
 	em := &emitter{j: j, dir: jobDir, sink: sink}
 
 	// checking: the unified dependency gate (spec section 7).
@@ -171,6 +178,15 @@ func runPipeline(ctx context.Context, cfg *config.Config, req RunRequest, sink f
 			fmt.Errorf("preparing: %w", err))
 	}
 	res.OutputDir = prep.analysisDir
+	// Per-repo mutual exclusion (spec section 10): hold the analysis
+	// dir lock for the rest of the run; a second run on the same dir
+	// fails fast here with WORKFLOW_LOCKED.
+	release, err := AcquireRepoLock(prep.analysisDir)
+	if err != nil {
+		return res, em.fail(job.StatePreparing, lockFailureEvent(prep.analysisDir, err), nil,
+			fmt.Errorf("preparing: %w", err))
+	}
+	defer release()
 	if err := em.finishStage(job.StatePreparing, prep.detail()); err != nil {
 		return res, err
 	}
