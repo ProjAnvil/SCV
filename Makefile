@@ -31,3 +31,16 @@ eval-compare: ## per-case diff with significance bands: $(COMPARE_LANG)-$(OLD_TA
 
 eval-clean: ## remove generated reports
 	rm -rf $(EVAL_DIR)/reports/*
+
+# Engine (Go control plane) — delegated to engine/Makefile.
+
+.PHONY: engine-build engine-test engine-test-integration
+
+engine-build: ## build the Go engine
+	$(MAKE) -C engine build
+
+engine-test: ## engine unit tests + coverage gate (>=80% on engine/internal/...)
+	$(MAKE) -C engine test
+
+engine-test-integration: ## engine integration tests (real perception fixtures; wired by a later task)
+	$(MAKE) -C engine test-integration
