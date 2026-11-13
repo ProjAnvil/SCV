@@ -43,6 +43,60 @@ func assertSymlink(t *testing.T, path, wantTarget string) {
 	}
 }
 
+func TestDiscoverEnsuringLayout(t *testing.T) {
+	t.Run("pair-only dist becomes the flat layout and the flags follow", func(t *testing.T) {
+		root := fakePlatformPair(t, t.TempDir(), runtime.GOOS+"-"+runtime.GOARCH)
+
+		snap, err := DiscoverEnsuringLayout(Options{
+			ScvHome:  t.TempDir(),
+			EnvVars:  isolate("", t.TempDir(), "SCV_PERCEPTION_DIST="+root),
+		})
+		if err != nil {
+			t.Fatalf("DiscoverEnsuringLayout: %v", err)
+		}
+		if !snap.PrebuiltLoader || !snap.PrebuiltGraphMCP {
+			t.Fatalf("Prebuilt = %t/%t, want true/true after the layout selection", snap.PrebuiltLoader, snap.PrebuiltGraphMCP)
+		}
+		assertSymlink(t, filepath.Join(root, "loader", "perception-loader"),
+			filepath.Join("..", runtime.GOOS+"-"+runtime.GOARCH, "loader", "perception-loader"))
+		assertSymlink(t, filepath.Join(root, "graphmcp", "scv-graph-mcp"),
+			filepath.Join("..", runtime.GOOS+"-"+runtime.GOARCH, "graphmcp", "scv-graph-mcp"))
+	})
+
+	t.Run("layout failure still returns the refreshed snapshot", func(t *testing.T) {
+		root := fakePlatformPair(t, t.TempDir(), runtime.GOOS+"-"+runtime.GOARCH)
+		// dist/loader as a regular file makes the symlink swap fail.
+		if err := os.WriteFile(filepath.Join(root, "loader"), []byte("x"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+
+		snap, err := DiscoverEnsuringLayout(Options{
+			ScvHome: t.TempDir(),
+			EnvVars: isolate("", t.TempDir(), "SCV_PERCEPTION_DIST="+root),
+		})
+		if err == nil {
+			t.Fatal("DiscoverEnsuringLayout over a broken layout: want error, got nil")
+		}
+		if snap == nil {
+			t.Fatal("layout failure lost the snapshot, want it for diagnostic callers")
+		}
+		if snap.DistRoot != root {
+			t.Fatalf("DistRoot = %q, want %q", snap.DistRoot, root)
+		}
+		// The refreshed flags honestly report the unusable flat layout.
+		if snap.PrebuiltLoader {
+			t.Error("PrebuiltLoader = true despite the failed layout")
+		}
+	})
+
+	t.Run("discovery failure returns nil", func(t *testing.T) {
+		snap, err := DiscoverEnsuringLayout(Options{EnvVars: []string{"PATH=", "HOME="}})
+		if err == nil || snap != nil {
+			t.Fatalf("unresolvable home: (%p, %v), want (nil, error)", snap, err)
+		}
+	})
+}
+
 func TestEnsureDistLayoutSelectsPlatform(t *testing.T) {
 	root := fakePlatformPair(t, t.TempDir(), "linux-amd64")
 	// A decoy pair for another platform must never be selected.

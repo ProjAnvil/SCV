@@ -41,6 +41,31 @@ func EnsureDistLayout(distRoot string) error {
 	return ensureDistLayout(distRoot, runtime.GOOS+"-"+runtime.GOARCH, layoutLockStale)
 }
 
+// DiscoverEnsuringLayout is the production discovery entry point (spec
+// section 11): Discover, then EnsureDistLayout on the discovered dist
+// root, then a refresh of the prebuilt flags so the snapshot the caller
+// gates on reflects the pair the layout selection just installed — a
+// no-Go host that unpacked only the platform-pair dist is reported with
+// the prebuilts present, not degraded to go-missing.
+//
+// Error contract: a discovery failure returns (nil, err) unchanged; a
+// layout failure returns the refreshed snapshot TOGETHER with the error,
+// so diagnostic callers (`scv env`) can still report the snapshot while
+// the run pipeline fails its checking stage on the error.
+func DiscoverEnsuringLayout(opts Options) (*Env, error) {
+	snap, err := Discover(opts)
+	if err != nil {
+		return nil, err
+	}
+	lerr := EnsureDistLayout(snap.DistRoot)
+	snap.PrebuiltLoader = fileExists(filepath.Join(snap.DistRoot, "loader", "perception-loader"))
+	snap.PrebuiltGraphMCP = fileExists(filepath.Join(snap.DistRoot, "graphmcp", "scv-graph-mcp"))
+	if lerr != nil {
+		return snap, fmt.Errorf("ensure dist layout: %w", lerr)
+	}
+	return snap, nil
+}
+
 // ensureDistLayout is EnsureDistLayout with the platform id and the
 // lock's stale window injectable for tests.
 func ensureDistLayout(distRoot, platform string, stale time.Duration) error {

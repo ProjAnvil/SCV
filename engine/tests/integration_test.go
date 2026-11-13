@@ -38,6 +38,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"slices"
 	"strings"
 	"syscall"
@@ -1255,4 +1256,75 @@ func TestIntegrationPrebuiltDistNoGo(t *testing.T) {
 	}
 
 	h.assertGitClean(src)
+}
+
+// TestIntegrationPlatformPairDistNoGo inverts TestIntegrationPrebuiltDistNoGo:
+// the dist carries ONLY the current platform's pair under
+// dist/<goos>-<goarch>/ (the runtime-tarball layout of spec section 11) with
+// an empty flat layout, and go is stripped from PATH. The engine's checking
+// stage must select the pair into the flat layout on the fly
+// (env.DiscoverEnsuringLayout), so the gate sees the prebuilts, no go
+// degradation fires, and the full chain runs to structure.vg — the
+// no-Go-host story the spec promises for first run.
+func TestIntegrationPlatformPairDistNoGo(t *testing.T) {
+	h := newHarness(t)
+	platform := runtime.GOOS + "-" + runtime.GOARCH
+	pairDist := filepath.Join(h.work, "pair-dist")
+	copyFile(t, filepath.Join(sharedDist, "loader", "perception-loader"),
+		filepath.Join(pairDist, platform, "loader", "perception-loader"))
+	copyFile(t, filepath.Join(sharedDist, "graphmcp", "scv-graph-mcp"),
+		filepath.Join(pairDist, platform, "graphmcp", "scv-graph-mcp"))
+	h.dist = pairDist
+	src := h.copyFixture(fixtureGolang, "pairdist")
+
+	evs := h.runPipeline(map[string]string{"PATH": pathWithout("go")},
+		"run", src, "--project", "pairdist", "--scv-home", h.home)
+
+	want := append([]string{"stage_started:checking", "degraded:checking", "stage_finished:checking"},
+		pairs("preparing", "detecting", "analyzing", "grading", "query_tier", "finalizing")...)
+	want = append(want, "job_result:done")
+	assertStages(t, evs, want)
+
+	// The layout selection happened before the gate classified: the go
+	// item never fired, exactly like the flat-prebuilt case.
+	if items := degradedItems(evs); !slices.Equal(items, []string{"docgen-unconfigured"}) {
+		t.Errorf("degraded items = %v, want [docgen-unconfigured] only", items)
+	}
+	done := jobResultEv(t, evs)
+	if reasons, _ := done.Detail["perception_reason"].([]any); slices.Contains(reasons, "go-missing") {
+		t.Errorf("job_result perception_reason %v contains go-missing despite the selected pair", reasons)
+	}
+
+	// The engine installed the flat layout: relative symlinks to the pair.
+	assertDistSymlink(t, filepath.Join(pairDist, "loader", "perception-loader"),
+		filepath.Join("..", platform, "loader", "perception-loader"))
+	assertDistSymlink(t, filepath.Join(pairDist, "graphmcp", "scv-graph-mcp"),
+		filepath.Join("..", platform, "graphmcp", "scv-graph-mcp"))
+
+	// The full chain genuinely ran to structure.vg and it is queryable.
+	dir := h.analysisDir("pairdist")
+	mustExist(t, filepath.Join(dir, "structure.vg"))
+	result, _ := h.runJSON(nil, "query", "cypher", "pairdist", "MATCH (n) RETURN n").(map[string]any)
+	if result == nil {
+		t.Fatalf("query cypher output not an object")
+	}
+	total, _ := result["total"].(float64)
+	if want := float64(structureNodeCount(t, dir)); total != want {
+		t.Errorf("query cypher total = %v, want structure.json nodes %v", total, want)
+	}
+
+	h.assertGitClean(src)
+}
+
+// assertDistSymlink fails unless path is a symlink with exactly the wanted
+// relative target — the layout the engine's platform-pair selection writes.
+func assertDistSymlink(t *testing.T, path, wantTarget string) {
+	t.Helper()
+	got, err := os.Readlink(path)
+	if err != nil {
+		t.Fatalf("readlink %s: %v", path, err)
+	}
+	if got != wantTarget {
+		t.Fatalf("symlink %s -> %s, want -> %s", path, got, wantTarget)
+	}
 }

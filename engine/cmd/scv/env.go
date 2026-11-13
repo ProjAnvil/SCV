@@ -24,9 +24,19 @@ func newEnvCmd() *cobra.Command {
 			if err != nil {
 				return fail(exitError, "%v", err)
 			}
-			snapshot, err := env.Discover(env.Options{ScvHome: home})
-			if err != nil {
+			// Discovery through the layout-ensuring entry point (spec
+			// section 11): `scv env` on a fresh install selects the
+			// current platform's prebuilt pair into the flat dist layout,
+			// so the report (and every later run) sees the prebuilts. A
+			// discovery failure still fails the verb; a layout failure
+			// only warns — the snapshot stays reportable and the verb
+			// keeps its exit-0 contract.
+			snapshot, err := env.DiscoverEnsuringLayout(env.Options{ScvHome: home})
+			if snapshot == nil {
 				return fail(exitError, "%v", err)
+			}
+			if err != nil {
+				diagf("warning: %v", err)
 			}
 			// A broken config file degrades to zero config here (the gate
 			// treats nil as defaults); `scv env` stays exit 0 per spec.

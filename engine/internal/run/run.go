@@ -89,14 +89,21 @@ type discoverFunc func(env.Options) (*env.Env, error)
 
 // Run executes one full pipeline as a structure-only run (no doc
 // generator wired). See RunWith for the docgen hook.
+//
+// Production discovery runs through env.DiscoverEnsuringLayout (spec
+// section 11): the checking stage selects the current platform's
+// prebuilt dist pair into the flat layout before the gate classifies,
+// so a no-Go host with a packed runtime gets the full chain instead of
+// a go-missing degradation. A layout failure fails the checking stage
+// like any other environment error.
 func Run(ctx context.Context, cfg *config.Config, req RunRequest, sink func(job.Event)) (*RunResult, error) {
-	return runPipeline(ctx, cfg, req, sink, nil, env.Discover)
+	return runPipeline(ctx, cfg, req, sink, nil, env.DiscoverEnsuringLayout)
 }
 
 // RunWith is Run with the doc-generation hook injected. Task 7's
 // generator (and the CLI wiring it) enter here.
 func RunWith(ctx context.Context, cfg *config.Config, req RunRequest, sink func(job.Event), docs DocGenerator) (*RunResult, error) {
-	return runPipeline(ctx, cfg, req, sink, docs, env.Discover)
+	return runPipeline(ctx, cfg, req, sink, docs, env.DiscoverEnsuringLayout)
 }
 
 // runPipeline drives the frozen stage flow of spec section 7:
@@ -138,6 +145,9 @@ func runPipeline(ctx context.Context, cfg *config.Config, req RunRequest, sink f
 	}
 	snapshot, err := discover(env.Options{ScvHome: cfg.ScvHome})
 	if err != nil {
+		// Discovery (and, in production, the platform-pair layout
+		// selection of spec section 11) failed: a checking-stage failure
+		// event with the ENV_INCOMPLETE code.
 		return res, em.fail(job.StateChecking, job.EventError{
 			Code:    CodeEnvIncomplete,
 			Message: fmt.Sprintf("environment discovery failed: %v", err),
