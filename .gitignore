@@ -2,3 +2,5 @@
 .worktrees/
 dist-release/
 perception/docgen/
+engine/cover.out
+engine/cover.html

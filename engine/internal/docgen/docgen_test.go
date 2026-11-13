@@ -413,10 +413,37 @@ func TestAssetsLangMapping(t *testing.T) {
 		}
 	})
 
-	t.Run("repo-checkout fallback resolves the real checkout", func(t *testing.T) {
-		root := repoRoot(t)
+	t.Run("repo-checkout fallback resolves the anchored checkout", func(t *testing.T) {
+		// Hermetic anchor (final-review F1): synthesize a minimal repo
+		// checkout in a tmp dir — perception/, agents/<lang>/, skills
+		// templates — and anchor the fallback there, so the subtest never
+		// depends on whether the real checkout (or a pack-generated
+		// perception/docgen/ mirror, which would win as the packed layout)
+		// exists on the machine running the tests.
+		root := t.TempDir()
+		if err := os.MkdirAll(filepath.Join(root, "perception"), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		analyzerMarker := "hermetic-analyzer: en project-analyzer body"
+		analyzerPath := filepath.Join(root, "agents", "en", "project-analyzer.md")
+		if err := os.MkdirAll(filepath.Dir(analyzerPath), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(analyzerPath, []byte(analyzerMarker+"\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		for _, slug := range docSlugs {
+			tmpl := filepath.Join(root, "skills", "en", "references", "templates", templateName(slug))
+			if err := os.MkdirAll(filepath.Dir(tmpl), 0o755); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.WriteFile(tmpl, []byte("hermetic template: "+slug+"\n"), 0o644); err != nil {
+				t.Fatal(err)
+			}
+		}
+
 		h := newHarness(t, "", func(g *Generator) {
-			g.AssetsRoot = filepath.Join(root, "perception", "docgen") // packed root absent in a checkout
+			g.AssetsRoot = filepath.Join(root, "perception", "docgen") // packed layout absent by construction
 		})
 		capture := t.TempDir()
 		t.Setenv("SCV_CAPTURE_DIR", capture)
@@ -425,20 +452,15 @@ func TestAssetsLangMapping(t *testing.T) {
 			t.Fatalf("Generate: %v", err)
 		}
 		wantTemplate := filepath.Join(root, "skills", "en", "references", "templates", "README.template.md")
-		if _, err := os.Stat(wantTemplate); err != nil {
-			t.Fatalf("test expects the real template: %v", err)
-		}
 		envText := readCapture(t, capture, "env.readme")
 		if !strings.Contains(envText, "SCV_TEMPLATE="+wantTemplate+"\n") {
-			t.Errorf("SCV_TEMPLATE did not resolve to the checkout template %s", wantTemplate)
+			t.Errorf("SCV_TEMPLATE did not resolve to the anchored checkout template %s", wantTemplate)
 		}
-		analyzer, err := os.ReadFile(filepath.Join(root, "agents", "en", "project-analyzer.md"))
-		if err != nil {
-			t.Fatal(err)
+		if !strings.Contains(readCapture(t, capture, "stdin.readme"), analyzerMarker) {
+			t.Errorf("stdin lacks the anchored agents/en/project-analyzer.md body (marker %q)", analyzerMarker)
 		}
-		firstLine := strings.TrimSpace(strings.SplitN(string(analyzer), "\n", 2)[0])
-		if !strings.Contains(readCapture(t, capture, "stdin.readme"), firstLine) {
-			t.Errorf("stdin lacks the real agents/en/project-analyzer.md body (marker %q)", firstLine)
+		if !strings.Contains(readCapture(t, capture, "stdin.readme"), "hermetic template: readme") {
+			t.Errorf("stdin lacks the anchored template body")
 		}
 	})
 

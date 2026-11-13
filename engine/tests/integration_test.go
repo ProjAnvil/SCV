@@ -822,6 +822,14 @@ func TestIntegrationGoMissingReduced(t *testing.T) {
 // degrading, the structure stages drop entirely, and perceive's own
 // uv-missing skip folds into a reduced done, exit 0.
 func TestIntegrationAllowDegradedUvMissing(t *testing.T) {
+	// F2 guard (final review): discovery probes /opt/homebrew/bin/uv as an
+	// absolute fallback that no PATH/HOME rewriting can hide. On a machine
+	// with brew-installed uv the uv-missing case is unproducible; skip with
+	// a clear reason rather than fail (or silently test something else).
+	if _, err := os.Stat("/opt/homebrew/bin/uv"); err == nil {
+		t.Skip("uv found at /opt/homebrew/bin/uv (brew install): the absolute discovery fallback cannot be masked by PATH/HOME rewriting, so the uv-missing case cannot run on this machine")
+	}
+
 	h := newHarness(t)
 	isoHome := filepath.Join(h.work, "isolated-home")
 	if err := os.MkdirAll(isoHome, 0o755); err != nil {

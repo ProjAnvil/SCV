@@ -38,8 +38,15 @@ entry that can run `uv` **and** pins `HOME` to an isolated dir, which is
 how the engine's discovery fallbacks (`~/.local/bin/uv`,
 `/opt/homebrew/bin/uv`) are also hidden. On a machine with uv installed
 at `/opt/homebrew/bin/uv` that fallback is an absolute path and the case
-cannot be produced by PATH/HOME alone; the machine this suite was built
-on has uv at `~/.local/bin/uv`.
+cannot be produced by PATH/HOME alone (the test skips there); the
+machine this suite was built on has uv at `~/.local/bin/uv`.
+
+Shared-dir hazard (go/uv filtering drops whole PATH entries): the
+go-missing and uv-missing cases rewrite PATH by dropping **every entry
+that can produce the hidden tool** — if one directory holds several
+tools (e.g. brew's `/opt/homebrew/bin` holding both `git` and `uv`),
+filtering for one tool removes the others from the rewritten PATH too,
+and the case then exercises a different environment than intended.
 
 ## Fixture inventory
 
