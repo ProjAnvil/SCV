@@ -7,6 +7,10 @@
 // The façade adds no logic of its own: every operation delegates to the
 // internal packages (run, job, env, query) and only adapts their
 // synchronous, CLI-shaped APIs to an async, handle-based surface.
+//
+// Process-group note: every run pipeline calls SetProcessGroup on its own
+// process, so a run started in-process through this package moves the
+// embedding host itself into a new process group (pgid == host pid).
 package supervisor
 
 import (
