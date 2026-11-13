@@ -13,8 +13,8 @@ build: ## compile all engine packages
 test: ## unit tests: race detector + >=80% coverage gate on internal/ packages
 	$(GO) test ./... -race -coverprofile=$(COVER_PROFILE) && $(GO) tool cover -func=$(COVER_PROFILE) | awk '$$3+0 < 80 && $$1 ~ /internal/ {print; f=1} END {exit f}'
 
-test-integration: ## integration tests (real perception fixtures; suite wired by a later task)
-	$(GO) test ./... -tags=integration
+test-integration: ## integration tests: real scv + perceive.py over perception fixtures (build tag `integration`; see tests/README.md)
+	$(GO) test -tags=integration ./tests/ -v -timeout 20m
 
 cover: ## run unit tests and write cover.out plus an HTML report
 	$(GO) test ./... -race -coverprofile=$(COVER_PROFILE)
