@@ -7,10 +7,13 @@ package supervisor_test
 // tests use.
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -60,6 +63,108 @@ func stubPerceiveEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("SCV_ENGINE_TEST_PERCEIVE", path)
+}
+
+// repoRoot walks up from the package dir to the repository checkout
+// root: the first ancestor containing perception/ — the same locator the
+// docgen package tests use.
+func repoRoot(t *testing.T) string {
+	t.Helper()
+	dir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("getwd: %v", err)
+	}
+	for {
+		if info, err := os.Stat(filepath.Join(dir, "perception")); err == nil && info.IsDir() {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			t.Fatal("repository root (directory containing perception/) not found")
+		}
+		dir = parent
+	}
+}
+
+// TestSupervisorRunDocgen pins the supervisor's docgen wiring: a config
+// with an llm section (command mode, the shared fake-llm.sh fixture)
+// must produce the four documents from a supervised run — the embedding
+// host gets the same generating stage the scv CLI wires, not a silent
+// structure-only run. Asset resolution is pinned to the committed
+// testdata mirror via SCV_DOCGEN_ASSETS, the docgen package's test
+// override seam, so the tmp perception root needs no pack.
+func TestSupervisorRunDocgen(t *testing.T) {
+	home := newTestHome(t)
+	stubPerceiveEnv(t)
+	root := repoRoot(t)
+	fakeLLM := filepath.Join(root, "engine", "tests", "fake-llm.sh")
+	if info, err := os.Stat(fakeLLM); err != nil || info.Mode()&0o111 == 0 {
+		t.Fatalf("fake-llm.sh fixture unusable: %v (mode %v)", err, info.Mode())
+	}
+	cfgBody := fmt.Sprintf(`{"structure_analysis_enabled": false, "llm": {"mode": "command", "command": ["/bin/sh", %q], "timeout_s": 60, "retry": 0}}`+"\n", fakeLLM)
+	if err := os.WriteFile(filepath.Join(home, "config.json"), []byte(cfgBody), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SCV_DOCGEN_ASSETS", filepath.Join(root, "engine", "internal", "docgen", "testdata", "docgen"))
+	cfg := loadTestConfig(t, home)
+	if cfg.LLM == nil {
+		t.Fatal("test config lost its llm section")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	sup, err := supervisor.New(ctx, cfg)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+
+	h, err := sup.Run(ctx, run.RunRequest{Source: t.TempDir(), Lang: "en"})
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	res, err := h.Wait(ctx)
+	if err != nil {
+		t.Fatalf("Wait: %v", err)
+	}
+
+	wantDocs := []string{"README.md", "SUMMARY.md", "ARCHITECTURE.md", "FILE_INDEX.md"}
+	if len(res.Docs) != len(wantDocs) {
+		t.Fatalf("Wait result docs = %v, want %d entries", res.Docs, len(wantDocs))
+	}
+	for i, name := range wantDocs {
+		if res.Docs[i] != filepath.Join(res.OutputDir, name) {
+			t.Errorf("docs[%d] = %q, want %q", i, res.Docs[i], filepath.Join(res.OutputDir, name))
+		}
+		data, rerr := os.ReadFile(filepath.Join(res.OutputDir, name))
+		if rerr != nil {
+			t.Errorf("document %s missing: %v", name, rerr)
+			continue
+		}
+		fixture, ferr := os.ReadFile(filepath.Join(root, "engine", "tests", "testdata",
+			strings.TrimSuffix(strings.ToLower(name), ".md")+".md"))
+		if ferr != nil {
+			t.Fatalf("read fixture for %s: %v", name, ferr)
+		}
+		if !bytes.Equal(data, fixture) {
+			t.Errorf("document %s content mismatch:\ngot:  %q\nwant: %q", name, data, fixture)
+		}
+	}
+
+	// The generating stage landed in the durable event log with its
+	// per-doc sub-events.
+	events, err := h.Events(ctx, 0)
+	if err != nil {
+		t.Fatalf("Events: %v", err)
+	}
+	var generating bool
+	for _, ev := range events {
+		if ev.Stage == string(job.StateGenerating) {
+			generating = true
+		}
+	}
+	if !generating {
+		t.Errorf("no generating-stage events in the job log; stages: %+v", events)
+	}
 }
 
 // loadTestConfig loads the hermetic home's config the way a host would.

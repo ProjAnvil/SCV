@@ -15,8 +15,10 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/projanvil/scv/engine/internal/config"
+	"github.com/projanvil/scv/engine/internal/docgen"
 	"github.com/projanvil/scv/engine/internal/env"
 	"github.com/projanvil/scv/engine/internal/job"
 	"github.com/projanvil/scv/engine/internal/query"
@@ -91,6 +93,13 @@ type startResult struct {
 // supervisor learns the id from the run's first sink event — the same
 // pattern the scv CLI uses — rather than pre-creating a directory the
 // pipeline would never adopt.
+//
+// Doc generation: when the config carries an llm section the docgen
+// generator is wired exactly the way `scv run` wires it (command,
+// timeout, retry, perception-root assets, per-request language), so an
+// embedding host whose config enables command-mode docgen gets the four
+// documents instead of a silent structure-only run. Without an llm
+// section the run stays structure-only, like the CLI.
 func (s *Supervisor) Run(ctx context.Context, req run.RunRequest) (*JobHandle, error) {
 	runCtx, cancel := context.WithCancel(s.ctx)
 	start := make(chan startResult, 1)
@@ -98,13 +107,28 @@ func (s *Supervisor) Run(ctx context.Context, req run.RunRequest) (*JobHandle, e
 
 	go func() {
 		defer cancel() // release the derived context once the run ends
+		var docs run.DocGenerator
+		if s.cfg.LLM != nil {
+			// A failed discovery here leaves docs nil; the pipeline's own
+			// gate then fails the run with the precise ENV_INCOMPLETE
+			// list — the CLI's behavior verbatim.
+			if snap, err := env.Discover(env.Options{ScvHome: s.cfg.ScvHome}); err == nil && snap.Python3 != nil {
+				docs = &docgen.Generator{
+					Command:    s.cfg.LLM.Command,
+					Timeout:    time.Duration(s.cfg.LLM.TimeoutS) * time.Second,
+					Retry:      s.cfg.LLM.Retry,
+					AssetsRoot: filepath.Join(snap.PerceptionRoot, "docgen"),
+					Lang:       req.Lang,
+				}
+			}
+		}
 		started := false
-		res, err := run.Run(runCtx, &s.cfg, req, func(ev job.Event) {
+		res, err := run.RunWith(runCtx, &s.cfg, req, func(ev job.Event) {
 			if !started {
 				started = true
 				start <- startResult{id: ev.ID}
 			}
-		})
+		}, docs)
 		if !started {
 			// Returned before creating a job (e.g. the jobs home is
 			// unwritable); err is the reason, defensive for a nil one.
