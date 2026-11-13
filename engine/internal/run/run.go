@@ -18,6 +18,7 @@ import (
 	"strings"
 
 	"github.com/projanvil/scv/engine/internal/config"
+	"github.com/projanvil/scv/engine/internal/docgen"
 	"github.com/projanvil/scv/engine/internal/env"
 	"github.com/projanvil/scv/engine/internal/job"
 	"github.com/projanvil/scv/engine/internal/repo"
@@ -207,10 +208,19 @@ func runPipeline(ctx context.Context, cfg *config.Config, req RunRequest, sink f
 		paths, gerr := docs.Generate(ctx, prep.repoPath, prep.analysisDir,
 			filepath.Join(prep.analysisDir, "structure.json"), perception, em.forward)
 		if gerr != nil {
-			return res, em.fail(job.StateGenerating, job.EventError{
+			// A typed docgen failure carries the precise wire code (e.g.
+			// STAGE_TIMEOUT, not DOCGEN_FAILED) and the command's stderr
+			// tail; any other error keeps the generic mapping.
+			evErr := job.EventError{
 				Code:    CodeDocGenFailed,
 				Message: gerr.Error(),
-			}, nil, fmt.Errorf("docgen: %w", gerr))
+			}
+			var failure *docgen.Failure
+			if errors.As(gerr, &failure) {
+				evErr.Code = failure.Code
+				evErr.LogTail = failure.LogTail
+			}
+			return res, em.fail(job.StateGenerating, evErr, nil, fmt.Errorf("docgen: %w", gerr))
 		}
 		res.Docs = paths
 		if err := em.finishStage(job.StateGenerating,

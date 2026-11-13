@@ -10,12 +10,12 @@ import (
 	"time"
 
 	"github.com/projanvil/scv/engine/internal/job"
-	"github.com/projanvil/scv/engine/internal/run"
 )
 
-// The Generator must slot into the run pipeline's doc-generation seam
-// (run.DocGenerator, Task 6) without adaptation.
-var _ run.DocGenerator = (*Generator)(nil)
+// Generator's fit with the run pipeline's doc-generation seam
+// (run.DocGenerator, Task 6) is proven end-to-end by the run package's
+// tests, which pass a *Generator straight into the pipeline; run imports
+// this package, so the assertion cannot live here (import cycle in test).
 
 // useTestAssets points asset resolution at the committed testdata mirror
 // of the packed docgen/ layout (absolute, so child-process env values are

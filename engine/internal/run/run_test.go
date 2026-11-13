@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/projanvil/scv/engine/internal/config"
+	"github.com/projanvil/scv/engine/internal/docgen"
 	"github.com/projanvil/scv/engine/internal/env"
 	"github.com/projanvil/scv/engine/internal/job"
 	"github.com/projanvil/scv/engine/internal/repo"
@@ -1265,6 +1266,78 @@ func TestDocGenFailureFails(t *testing.T) {
 	failed := findEvent(t, f.events, job.EventStageFailed, string(job.StateGenerating))
 	if failed.Error == nil || failed.Error.Code != CodeDocGenFailed {
 		t.Fatalf("stage_failed error = %+v, want code %s", failed.Error, CodeDocGenFailed)
+	}
+}
+
+// realDocGen builds the production Generator wired to the engine test
+// fixtures: engine/tests/fake-llm.sh (SCV_FAKE_MODE selects its scenario)
+// and the docgen package's packed-assets testdata mirror. Passing the
+// *docgen.Generator straight into the pipeline is also the compile-time
+// proof that Generator satisfies the DocGenerator seam. mutate adjusts
+// the Generator (e.g. a short Timeout).
+func realDocGen(t *testing.T, mode string, mutate func(*docgen.Generator)) *docgen.Generator {
+	t.Helper()
+	assets, err := filepath.Abs(filepath.Join("..", "docgen", "testdata", "docgen"))
+	if err != nil {
+		t.Fatalf("resolve docgen testdata: %v", err)
+	}
+	t.Setenv("SCV_DOCGEN_ASSETS", assets)
+	t.Setenv("SCV_FAKE_MODE", mode)
+	fake, err := filepath.Abs(filepath.Join("..", "..", "tests", "fake-llm.sh"))
+	if err != nil {
+		t.Fatalf("resolve fake-llm.sh: %v", err)
+	}
+	info, err := os.Stat(fake)
+	if err != nil || info.Mode()&0o111 == 0 {
+		t.Fatalf("fake-llm.sh fixture unusable: %v", err)
+	}
+	g := &docgen.Generator{Command: []string{fake}, Lang: "en"}
+	if mutate != nil {
+		mutate(g)
+	}
+	return g
+}
+
+// TestDocGenTimeoutMapsStageTimeout proves a docgen attempt timeout
+// reaches the pipeline events as STAGE_TIMEOUT (not the generic
+// DOCGEN_FAILED) when the real Generator runs through the pipeline.
+func TestDocGenTimeoutMapsStageTimeout(t *testing.T) {
+	f := newFixture(t, true)
+	stubMode(t, "full")
+	gen := realDocGen(t, "hang", func(g *docgen.Generator) { g.Timeout = 300 * time.Millisecond })
+
+	start := time.Now()
+	_, err := f.run(context.Background(), RunRequest{Source: makeGitRepo(t), Project: "dgt"}, gen)
+	if err == nil {
+		t.Fatal("docgen timeout must fail the run")
+	}
+	failed := findEvent(t, f.events, job.EventStageFailed, string(job.StateGenerating))
+	if failed.Error == nil || failed.Error.Code != docgen.CodeStageTimeout {
+		t.Fatalf("stage_failed error = %+v, want code %s", failed.Error, docgen.CodeStageTimeout)
+	}
+	if elapsed := time.Since(start); elapsed > 10*time.Second {
+		t.Fatalf("hang mode ran %v; the process-group kill did not fire", elapsed)
+	}
+}
+
+// TestDocGenFailureCarriesLogTail proves a failing LLM command surfaces
+// DOCGEN_FAILED with its stderr tail as the stage event's structured
+// log_tail field, not only inside the message text.
+func TestDocGenFailureCarriesLogTail(t *testing.T) {
+	f := newFixture(t, true)
+	stubMode(t, "full")
+	gen := realDocGen(t, "fail", nil)
+
+	_, err := f.run(context.Background(), RunRequest{Source: makeGitRepo(t), Project: "dgf2"}, gen)
+	if err == nil {
+		t.Fatal("docgen failure must fail the run")
+	}
+	failed := findEvent(t, f.events, job.EventStageFailed, string(job.StateGenerating))
+	if failed.Error == nil || failed.Error.Code != CodeDocGenFailed {
+		t.Fatalf("stage_failed error = %+v, want code %s", failed.Error, CodeDocGenFailed)
+	}
+	if !strings.Contains(failed.Error.LogTail, "fake-llm: simulated failure") {
+		t.Fatalf("stage_failed log_tail = %q, want the fake-llm stderr text", failed.Error.LogTail)
 	}
 }
 
