@@ -1,0 +1,105 @@
+{
+  "nodes": [
+    {
+      "key": "bean:orderController",
+      "label": "Bean",
+      "props": {
+        "beanName": "orderController",
+        "type": "OrderController",
+        "stereotype": "RestController",
+        "source": "cmd/server/main.go"
+      }
+    },
+    {
+      "key": "bean:orderService",
+      "label": "Bean",
+      "props": {
+        "beanName": "orderService",
+        "type": "OrderService",
+        "stereotype": "Service"
+      }
+    },
+    {
+      "key": "bean:orderRepository",
+      "label": "Bean",
+      "props": {
+        "beanName": "orderRepository",
+        "type": "OrderRepository",
+        "stereotype": "Repository"
+      }
+    },
+    {
+      "key": "bean:notificationService",
+      "label": "Bean",
+      "props": {
+        "beanName": "notificationService",
+        "type": "NotificationService",
+        "stereotype": "Service"
+      }
+    },
+    {
+      "key": "type:com/demo/OrderStore",
+      "label": "Type",
+      "props": {
+        "kind": "interface",
+        "loc": "store/order_store.go:12"
+      }
+    },
+    {
+      "key": "type:com/demo/MemoryOrderStore",
+      "label": "Type",
+      "props": {
+        "kind": "class",
+        "loc": "store/memory_order_store.go:20"
+      }
+    },
+    {
+      "key": "fn:com/demo/OrderController#place",
+      "label": "Method",
+      "props": {
+        "name": "place",
+        "visibility": "public"
+      }
+    },
+    {
+      "key": "fn:com/demo/OrderStore#save",
+      "label": "Method",
+      "props": {
+        "name": "save",
+        "visibility": "public"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "srcKey": "bean:orderController",
+      "dstKey": "bean:orderService",
+      "label": "INJECTS",
+      "props": { "via": "constructor" }
+    },
+    {
+      "srcKey": "bean:orderService",
+      "dstKey": "bean:orderRepository",
+      "label": "INJECTS",
+      "props": { "via": "constructor" }
+    },
+    {
+      "srcKey": "bean:orderController",
+      "dstKey": "bean:notificationService",
+      "label": "INJECTS",
+      "props": { "via": "field" }
+    },
+    {
+      "srcKey": "type:com/demo/MemoryOrderStore",
+      "dstKey": "type:com/demo/OrderStore",
+      "label": "IMPLEMENTS",
+      "props": null
+    },
+    {
+      "srcKey": "fn:com/demo/OrderController#place",
+      "dstKey": "fn:com/demo/OrderStore#save",
+      "label": "CALLS",
+      "props": { "line": 42 }
+    }
+  ]
+}
