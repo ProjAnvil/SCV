@@ -70,6 +70,9 @@ type (
 	DocGenerator = run.DocGenerator
 	// Event is one line of a job's events.jsonl (see internal/job).
 	Event = job.Event
+	// EventError is the error payload of failed events (see internal/job)
+	// — nameable so hosts can script failure events in handle fakes.
+	EventError = job.EventError
 )
 
 // New validates cfg, resolves the scv home layout, and prepares the

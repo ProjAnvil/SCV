@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.14.4] - 2026-11-15
+
+### Fixed
+- **`EventError` façade alias** (companion to v0.14.2/v0.14.3): the error payload of failed events lives in an internal package, so hosts could read inferred values but not script failure events in handle fakes. Re-exported as `supervisor.EventError`, completing the nameable event vocabulary alongside `Event`.
+
 ## [v0.14.3] - 2026-11-15
 
 ### Fixed
