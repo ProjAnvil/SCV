@@ -921,7 +921,19 @@ func TestRunSmokeRealDiscovery(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Setenv("HOME", t.TempDir())
-	t.Setenv("PATH", "/usr/bin:/bin")
+	// Single-directory PATH with only the tools the pipeline needs: no `go`
+	// regardless of platform (CI runners have /usr/bin/go, macOS does not).
+	shim := t.TempDir()
+	for _, tool := range []string{"git", "python3"} {
+		resolved, err := exec.LookPath(tool)
+		if err != nil {
+			t.Fatalf("resolve %s: %v", tool, err)
+		}
+		if err := os.Symlink(resolved, filepath.Join(shim, tool)); err != nil {
+			t.Fatalf("symlink %s: %v", tool, err)
+		}
+	}
+	t.Setenv("PATH", shim)
 	t.Setenv("SCV_HOME", home)
 	t.Setenv("SCV_PERCEPTION_ROOT", root)
 	t.Setenv("SCV_UV", uvBin)

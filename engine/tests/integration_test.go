@@ -479,35 +479,24 @@ var wantDocFiles = []string{"README.md", "SUMMARY.md", "ARCHITECTURE.md", "FILE_
 // Small utilities
 // ---------------------------------------------------------------------------
 
-// pathWithout filters every PATH entry that can produce any of the named
-// tools (the perception suite's _path_without technique: dir-content
-// checks catch symlinked brew-style installs too). Everything else stays.
-func pathWithout(tools ...string) string {
-	var kept []string
-	for _, dir := range filepath.SplitList(os.Getenv("PATH")) {
-		if dir == "" {
-			continue
+// maskedPATH builds a single-directory PATH containing symlinks to exactly
+// the named tools, resolved from the ambient PATH. Unlike directory-filtering
+// it is portable: on machines where the masked tool shares a directory with
+// tools we keep (e.g. /usr/bin/go next to git and python3 on CI runners),
+// nothing kept is lost and the masked tool is genuinely absent.
+func maskedPATH(t *testing.T, keep ...string) string {
+	t.Helper()
+	dir := t.TempDir()
+	for _, tool := range keep {
+		resolved, err := exec.LookPath(tool)
+		if err != nil {
+			t.Fatalf("maskedPATH: resolve %s: %v", tool, err)
 		}
-		drop := false
-		for _, tool := range tools {
-			if isExecFile(filepath.Join(dir, tool)) {
-				drop = true
-				break
-			}
-		}
-		if !drop {
-			kept = append(kept, dir)
+		if err := os.Symlink(resolved, filepath.Join(dir, tool)); err != nil {
+			t.Fatalf("maskedPATH: symlink %s: %v", tool, err)
 		}
 	}
-	return strings.Join(kept, string(filepath.ListSeparator))
-}
-
-func isExecFile(path string) bool {
-	info, err := os.Stat(path)
-	if err != nil || info.IsDir() {
-		return false
-	}
-	return info.Mode().Perm()&0o111 != 0
+	return dir
 }
 
 // copyTree copies a fixture directory recursively, preserving file modes.
@@ -783,7 +772,7 @@ func TestIntegrationGoMissingReduced(t *testing.T) {
 	h.dist = emptyDist
 	src := h.copyFixture(fixtureGolang, "gomissing")
 
-	evs := h.runPipeline(map[string]string{"PATH": pathWithout("go")},
+	evs := h.runPipeline(map[string]string{"PATH": maskedPATH(t, "git", "python3", "uv")},
 		"run", src, "--project", "gomissing", "--scv-home", h.home)
 
 	want := append([]string{"stage_started:checking", "degraded:checking", "stage_finished:checking"},
@@ -837,7 +826,7 @@ func TestIntegrationAllowDegradedUvMissing(t *testing.T) {
 	}
 	src := h.copyFixture(fixtureGolang, "uvmissing")
 
-	res := h.runSCV(map[string]string{"PATH": pathWithout("uv"), "HOME": isoHome},
+	res := h.runSCV(map[string]string{"PATH": maskedPATH(t, "git", "python3"), "HOME": isoHome},
 		"run", src, "--project", "uvmissing", "--scv-home", h.home, "--allow-degraded")
 	if res.code != 0 {
 		t.Fatalf("allow-degraded run exited %d:\n%s", res.code, res.stderr)
@@ -1222,7 +1211,7 @@ func TestIntegrationPrebuiltDistNoGo(t *testing.T) {
 	h.dist = prebuiltDist
 	src := h.copyFixture(fixtureGolang, "prebuiltnogo")
 
-	evs := h.runPipeline(map[string]string{"PATH": pathWithout("go")},
+	evs := h.runPipeline(map[string]string{"PATH": maskedPATH(t, "git", "python3", "uv")},
 		"run", src, "--project", "prebuiltnogo", "--scv-home", h.home)
 
 	want := append([]string{"stage_started:checking", "degraded:checking", "stage_finished:checking"},
@@ -1285,7 +1274,7 @@ func TestIntegrationPlatformPairDistNoGo(t *testing.T) {
 	h.dist = pairDist
 	src := h.copyFixture(fixtureGolang, "pairdist")
 
-	evs := h.runPipeline(map[string]string{"PATH": pathWithout("go")},
+	evs := h.runPipeline(map[string]string{"PATH": maskedPATH(t, "git", "python3", "uv")},
 		"run", src, "--project", "pairdist", "--scv-home", h.home)
 
 	want := append([]string{"stage_started:checking", "degraded:checking", "stage_finished:checking"},
