@@ -41,6 +41,15 @@ type Supervisor struct {
 	analysis string
 }
 
+// AgentInvoker re-exports the agent-mode executor seam: the invoke
+// surface of a langchain-golang agent. *agents.Agent (the return type
+// of both agents.CreateAgent and the prebuilt CreateReactAgent)
+// satisfies it structurally — hosts pass their initialized agent
+// as-is, and the agent keeps its own model, system prompt, tools, and
+// credentials. SCV delivers its document task as the Human message of
+// each call, so it never touches (or sees) the agent's credentials.
+type AgentInvoker = docgen.AgentInvoker
+
 // New validates cfg, resolves the scv home layout, and prepares the
 // jobs directory (idempotent). The ctx passed here is the root of every
 // run the supervisor starts: cancelling it unwinds all in-flight runs,
@@ -105,6 +114,21 @@ type startResult struct {
 // documents instead of a silent structure-only run. Without an llm
 // section the run stays structure-only, like the CLI.
 func (s *Supervisor) Run(ctx context.Context, req run.RunRequest) (*JobHandle, error) {
+	return s.startRun(ctx, req, nil)
+}
+
+// RunWithDocs starts a run whose doc generation is the caller's
+// generator, overriding whatever the config's llm section would have
+// wired. This is the entry point for agent-mode doc generation: build
+// the generator with AgentDocGenerator (or any run.DocGenerator of
+// your own) and hand it here. The handle semantics are Run's verbatim.
+func (s *Supervisor) RunWithDocs(ctx context.Context, req run.RunRequest, docs run.DocGenerator) (*JobHandle, error) {
+	return s.startRun(ctx, req, &docs)
+}
+
+// startRun is Run's body; docsOverride, when non-nil, replaces the
+// config-driven docgen wiring for this run.
+func (s *Supervisor) startRun(ctx context.Context, req run.RunRequest, docsOverride *run.DocGenerator) (*JobHandle, error) {
 	runCtx, cancel := context.WithCancel(s.ctx)
 	start := make(chan startResult, 1)
 	done := make(chan runOutcome, 1)
@@ -112,7 +136,9 @@ func (s *Supervisor) Run(ctx context.Context, req run.RunRequest) (*JobHandle, e
 	go func() {
 		defer cancel() // release the derived context once the run ends
 		var docs run.DocGenerator
-		if s.cfg.LLM != nil {
+		if docsOverride != nil {
+			docs = *docsOverride
+		} else if s.cfg.LLM != nil {
 			// A failed discovery here leaves docs nil; the pipeline's own
 			// gate then fails the run with the precise ENV_INCOMPLETE
 			// list — the CLI's behavior verbatim.
@@ -160,6 +186,51 @@ func (s *Supervisor) Run(ctx context.Context, req run.RunRequest) (*JobHandle, e
 	case <-s.ctx.Done():
 		return nil, fmt.Errorf("supervisor: shutting down: %w", s.ctx.Err())
 	}
+}
+
+// AgentDocGenerator builds the agent-mode doc generator for an
+// already-initialized langchain-golang agent: the four documents come
+// from the agent instead of an external command, with SCV's
+// project-analyzer skill delivered as the Human message of each call.
+// The agent's model, system prompt, tools, and credentials stay
+// entirely the host's; SCV never sees an API key.
+//
+// lang selects the asset language like RunRequest.Lang ("zh" default,
+// "en" for the English assets). Timeout and retry default to the
+// docgen package values; a config llm section, when present, overrides
+// them (its command is ignored in agent mode). The perception root for
+// asset resolution is discovered from the supervisor's scv home, so an
+// undiscoverable environment is an explicit error here — unlike the
+// config-driven path, a host asking for agent docgen never gets a
+// silent structure-only run.
+//
+// Feed the result to RunWithDocs. Agents built with a checkpointer
+// share thread state across calls; pass a checkpoint-free agent (or
+// isolate threads per call) so the four documents cannot pollute each
+// other.
+func (s *Supervisor) AgentDocGenerator(invoker AgentInvoker, lang string) (run.DocGenerator, error) {
+	if invoker == nil {
+		return nil, errors.New("supervisor: agent doc generator: invoker is nil")
+	}
+	snap, err := env.Discover(env.Options{ScvHome: s.cfg.ScvHome})
+	if err != nil {
+		return nil, fmt.Errorf("supervisor: agent doc generator: %w", err)
+	}
+	if snap.PerceptionRoot == "" {
+		return nil, errors.New("supervisor: agent doc generator: no perception root discovered")
+	}
+	g := &docgen.Generator{
+		Invoker:    invoker,
+		AssetsRoot: filepath.Join(snap.PerceptionRoot, "docgen"),
+		Lang:       lang,
+	}
+	if s.cfg.LLM != nil {
+		if s.cfg.LLM.TimeoutS > 0 {
+			g.Timeout = time.Duration(s.cfg.LLM.TimeoutS) * time.Second
+		}
+		g.Retry = s.cfg.LLM.Retry
+	}
+	return g, nil
 }
 
 // JobHandle is one asynchronously running job. ID is valid the moment

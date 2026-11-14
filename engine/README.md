@@ -85,6 +85,34 @@ travel via environment variables (`SCV_DOC`, `SCV_TEMPLATE`, ...), never
 argv — so whatever auth the command needs stays between the host and the
 command (environment references, the command's own login, ...).
 
+### Agent-mode doc generation (embedding hosts)
+
+A Go embedding host can generate the four documents from its own
+initialized [langchain-golang](https://github.com/projanvil/langchain-golang)
+agent — anything whose `Invoke(ctx, msgs)` returns messages, which
+includes the `*agents.Agent` returned by both `agents.CreateAgent` and
+the prebuilt `CreateReactAgent`. SCV delivers its document task (the
+project-analyzer skill, the structure summary, and the per-document
+template, headed with the same identity block the command mode passes
+as environment variables) as the Human message of each call — one call
+per document — and writes the last assistant message as the document.
+The agent keeps its own model, system prompt, tools, and credentials;
+SCV never sees an API key.
+
+```go
+sup, _ := supervisor.New(ctx, cfg)
+agent, _ := agents.CreateAgent(model, nil)          // host's own agent
+docs, _ := sup.AgentDocGenerator(agent, "en")        // adapt to a generator
+handle, _ := sup.RunWithDocs(ctx, req, docs)         // overrides config llm
+```
+
+Two constraints: pass a checkpoint-free agent (a checkpointer shares
+thread state across `Invoke` calls, so the four documents would pollute
+each other), and prefer a tool-less one for this task (the document
+payload is self-contained; tools only burn turns). `AgentDocGenerator`
+honors a config `llm` section's `timeout_s`/`retry` when present and
+ignores its `command`.
+
 ## Quickstart
 
 ```

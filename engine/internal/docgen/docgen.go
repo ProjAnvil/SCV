@@ -1,13 +1,20 @@
-// Package docgen implements command-mode doc generation (spec section
-// 8): the engine's only LLM path in v1. A configured external command
-// (for example `claude -p`) is invoked once per document — readme,
-// summary, architecture, file_index, in that order — with the document
-// identity and context handed over via environment variables, never
-// argv, so no per-run value can leak into process lists. The command's
-// stdout is the document; the engine writes it to the analysis dir.
+// Package docgen implements doc generation (spec section 8) through two
+// executor shapes behind one Generator: command mode — a configured
+// external command (for example `claude -p`) invoked once per document
+// with the document identity and context handed over via environment
+// variables, never argv, so no per-run value can leak into process
+// lists — and agent mode — an injected, already-initialized
+// langchain-golang agent (anything satisfying AgentInvoker, e.g. the
+// *agents.Agent returned by CreateAgent or CreateReactAgent) invoked
+// once per document with the same assembled payload as the Human
+// message. In both modes the executor's output text is the document;
+// the engine writes it to the analysis dir, readme, summary,
+// architecture, file_index in that order.
 //
 // Key custody: this package never reads, stores, or logs API keys.
-// Whatever auth the command needs is the host's business.
+// Whatever auth the command or the injected agent needs is the host's
+// business — agent mode keeps model credentials entirely inside the
+// host's own agent object.
 //
 // Generator implements run.DocGenerator, so the run pipeline accepts it
 // directly. Progress granularity: every attempt emits a generating-stage
@@ -29,6 +36,7 @@ import (
 	"strings"
 	"time"
 
+	lcmessages "github.com/projanvil/langchain-golang/core/messages"
 	"github.com/projanvil/scv/engine/internal/job"
 )
 
@@ -78,12 +86,34 @@ var canonicalNames = map[string]string{
 	"file_index":   "FILE_INDEX.md",
 }
 
+// AgentInvoker is the executor seam of agent mode: the invoke surface
+// of a langchain-golang agent. *agents.Agent (the return type of both
+// agents.CreateAgent and langgraph prebuilt CreateReactAgent) satisfies
+// it structurally, so hosts pass their initialized agent as-is. The
+// skill payload travels as the Human message of each call — the agent's
+// own system prompt, tools, and credentials stay untouched, which also
+// means SCV never sees the model credentials.
+//
+// Agents built with a checkpointer share thread state across Invoke
+// calls; hosts must pass a checkpoint-free agent (or isolate threads
+// per call) so the four documents cannot pollute each other.
+type AgentInvoker interface {
+	Invoke(ctx context.Context, msgs []lcmessages.Message) ([]lcmessages.Message, error)
+}
+
 // Generator produces the four project documents by calling an external
-// command once per document (spec section 8, command mode). It
-// implements run.DocGenerator.
+// command once per document (spec section 8, command mode) or, when
+// Invoker is set, an injected in-process agent once per document (agent
+// mode). It implements run.DocGenerator.
 type Generator struct {
+	// Invoker selects agent mode: when non-nil the per-document payload
+	// is delivered as one Human message to this agent instead of a
+	// subprocess, and Command is ignored. Exactly one executor shape is
+	// active per Generator; leaving both unset is a configuration error.
+	Invoker AgentInvoker
+
 	// Command is the LLM command, invoked exactly as configured — the
-	// engine never appends arguments.
+	// engine never appends arguments. Ignored in agent mode.
 	Command []string
 
 	// Timeout is the per-attempt wall-clock budget. Zero or negative
@@ -146,8 +176,8 @@ func (f *Failure) Error() string {
 // killed). Context cancellation returns early with the context error.
 // The returned paths list is nil unless all four documents were written.
 func (g *Generator) Generate(ctx context.Context, repoPath, analysisDir, structureJSONPath string, summary map[string]any, sink func(job.Event)) ([]string, error) {
-	if len(g.Command) == 0 {
-		return nil, errors.New("docgen: command is required (config llm.command)")
+	if g.Invoker == nil && len(g.Command) == 0 {
+		return nil, errors.New("docgen: exactly one executor is required (config llm.command or an injected agent)")
 	}
 	if sink == nil {
 		sink = func(job.Event) {}
@@ -230,7 +260,14 @@ func (g *Generator) generateDoc(ctx context.Context, task docTask, attempts int,
 		}
 		sink(docEvent(job.EventStageStarted, task.slug, attempt))
 
-		out, failure, err := g.runAttempt(ctx, task, attempt)
+		var out []byte
+		var failure *Failure
+		var err error
+		if g.Invoker != nil {
+			out, failure, err = g.invokeAttempt(ctx, task, attempt)
+		} else {
+			out, failure, err = g.runAttempt(ctx, task, attempt)
+		}
 		if err != nil {
 			return "", err // run cancelled, not a docgen failure
 		}
@@ -311,6 +348,96 @@ func (g *Generator) runAttempt(ctx context.Context, task docTask, attempt int) (
 		}, nil
 	}
 	return stdout.Bytes(), nil, nil
+}
+
+// invokeAttempt delivers one document's payload to the injected agent.
+// Outcomes mirror runAttempt exactly: success (doc bytes, nil, nil), a
+// retryable *Failure (nil, failure, nil), or a run cancellation
+// surfaced as a plain error (nil, nil, err). The payload is the command
+// mode's stdin prompt prefixed with an in-process equivalent of the
+// environment contract header, delivered as a single Human message; the
+// agent's own system prompt and tools stay as the host built them.
+func (g *Generator) invokeAttempt(ctx context.Context, task docTask, attempt int) ([]byte, *Failure, error) {
+	actx, cancel := context.WithTimeout(ctx, task.timeout)
+	defer cancel()
+
+	msgs := []lcmessages.Message{lcmessages.Human(taskHeader(task) + task.prompt)}
+	res, err := g.Invoker.Invoke(actx, msgs)
+	if err != nil {
+		// The run itself being cancelled outranks the attempt outcome.
+		if cerr := ctx.Err(); cerr != nil {
+			return nil, nil, fmt.Errorf("docgen %s: %w", task.slug, cerr)
+		}
+		if actx.Err() != nil { // deadline hit before Invoke returned
+			return nil, &Failure{
+				Code:    CodeStageTimeout,
+				Doc:     task.slug,
+				Attempt: attempt,
+				Message: fmt.Sprintf("agent timed out after %s: %v", task.timeout, err),
+			}, nil
+		}
+		return nil, &Failure{
+			Code:    CodeDocGenFailed,
+			Doc:     task.slug,
+			Attempt: attempt,
+			Message: fmt.Sprintf("agent invoke: %v", err),
+		}, nil
+	}
+	if cerr := ctx.Err(); cerr != nil { // Invoke returned, but the run is gone
+		return nil, nil, fmt.Errorf("docgen %s: %w", task.slug, cerr)
+	}
+	if actx.Err() != nil {
+		return nil, &Failure{
+			Code:    CodeStageTimeout,
+			Doc:     task.slug,
+			Attempt: attempt,
+			Message: fmt.Sprintf("agent timed out after %s", task.timeout),
+		}, nil
+	}
+	text, ok := extractLastAI(res)
+	if !ok {
+		return nil, &Failure{
+			Code:    CodeDocGenFailed,
+			Doc:     task.slug,
+			Attempt: attempt,
+			Message: fmt.Sprintf("agent returned no assistant message (%d messages)", len(res)),
+		}, nil
+	}
+	if strings.TrimSpace(text) == "" {
+		return nil, &Failure{
+			Code:    CodeDocGenFailed,
+			Doc:     task.slug,
+			Attempt: attempt,
+			Message: "agent produced empty output",
+		}, nil
+	}
+	return []byte(text), nil, nil
+}
+
+// taskHeader renders the in-process equivalent of the command mode's
+// environment contract: the same document identity and context fields,
+// as a compact block ahead of the prompt body.
+func taskHeader(task docTask) string {
+	var b strings.Builder
+	b.WriteString("# SCV document task\n")
+	fmt.Fprintf(&b, "doc: %s\n", task.slug)
+	fmt.Fprintf(&b, "lang: %s\n", task.lang)
+	fmt.Fprintf(&b, "repository: %s\n", task.repoPath)
+	fmt.Fprintf(&b, "analysis_dir: %s\n", task.analysisDir)
+	fmt.Fprintf(&b, "structure_json: %s\n", task.structureJSONPath)
+	fmt.Fprintf(&b, "template: %s\n\n", task.templatePath)
+	return b.String()
+}
+
+// extractLastAI returns the text of the last assistant message in the
+// agent's reply, the in-process analogue of reading a command's stdout.
+func extractLastAI(res []lcmessages.Message) (string, bool) {
+	for i := len(res) - 1; i >= 0; i-- {
+		if res[i].Role == lcmessages.RoleAI {
+			return lcmessages.Text(res[i]), true
+		}
+	}
+	return "", false
 }
 
 // docEvent builds one per-document generating-stage sub-event. ID/Seq/TS

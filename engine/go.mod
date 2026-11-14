@@ -4,6 +4,7 @@ go 1.27.2
 
 require (
 	github.com/gofiber/fiber/v2 v2.52.9
+	github.com/projanvil/langchain-golang v0.13.0
 	github.com/projanvil/vectra v0.14.4
 	github.com/spf13/cobra v1.10.2
 )
@@ -21,5 +22,5 @@ require (
 	github.com/valyala/bytebufferpool v1.0.0 // indirect
 	github.com/valyala/fasthttp v1.51.0 // indirect
 	github.com/valyala/tcplisten v1.0.0 // indirect
-	golang.org/x/sys v0.28.0 // indirect
+	golang.org/x/sys v0.34.0 // indirect
 )

@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Agent-mode doc generation for embedding hosts** (`engine/supervisor`): `supervisor.AgentDocGenerator` adapts a host-initialized langchain-golang agent into a `run.DocGenerator` (the `*agents.Agent` returned by `agents.CreateAgent` and the prebuilt `CreateReactAgent` satisfies `supervisor.AgentInvoker` structurally), and `supervisor.RunWithDocs` runs a pipeline with the injected generator, overriding the config `llm` wiring. The document task — the project-analyzer skill, the structure summary, and the per-document template under an identity header mirroring the command-mode environment contract — is delivered as the Human message of one `Invoke` call per document (readme → summary → architecture → file_index); the last assistant message becomes the document. Model, system prompt, tools, and credentials stay inside the host's agent: the engine never sees an API key. Events, per-doc sub-events, retry, and the `DOCGEN_FAILED`/`STAGE_TIMEOUT` failure mapping are identical to command mode; a config `llm` section's `timeout_s`/`retry` carry over while its `command` is ignored. Constraints (engine README): checkpoint-free agents only — a checkpointer shares thread state across calls — and tool-less agents preferred. New dependency: `github.com/projanvil/langchain-golang v0.13.0` (only `core/messages` is imported).
+
 ## [v0.14.0] - 2026-11-14
 
 ### Added
