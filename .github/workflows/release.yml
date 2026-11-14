@@ -36,6 +36,19 @@ jobs:
             exit 1
           fi
 
+      # The Go engine is a subdirectory module (engine/go.mod): it resolves
+      # semver only through an engine/-prefixed tag. Keep it in lockstep with
+      # the root tag so `go get github.com/projanvil/scv/engine@vX.Y.Z` works.
+      - name: Push engine subdirectory tag
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          if git ls-remote --exit-code --tags origin "refs/tags/engine/$tag" >/dev/null 2>&1; then
+            echo "engine/$tag already exists, skipping"
+            exit 0
+          fi
+          git tag "engine/$tag"
+          git push origin "engine/$tag"
+
       # Extract the tag's CHANGELOG section (up to the next "## [" heading)
       # plus a compare link; used verbatim as the release body.
       - name: Extract release notes from CHANGELOG
