@@ -1,0 +1,63 @@
+# Release pipeline: on a pushed v* tag, build all pack artifacts on CI and
+# attach them to a GitHub release with notes extracted from CHANGELOG.md.
+# Local machines no longer upload multi-MB artifacts.
+name: release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  pack-and-release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+
+      # Fail fast if the pushed tag does not match the version pack.sh would
+      # stamp (first "## [vX.Y.Z]" heading in CHANGELOG.md).
+      - name: Verify tag matches CHANGELOG version
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          ver="$(sed -n 's/^## \[\(v[0-9]*\.[0-9]*\.[0-9]*\)\].*/\1/p' CHANGELOG.md | head -1)"
+          if [ "$tag" != "$ver" ]; then
+            echo "tag $tag does not match CHANGELOG version $ver" >&2
+            exit 1
+          fi
+
+      # Extract the tag's CHANGELOG section (up to the next "## [" heading)
+      # plus a compare link; used verbatim as the release body.
+      - name: Extract release notes from CHANGELOG
+        id: notes
+        run: |
+          tag="${GITHUB_REF_NAME}"
+          sed -n "/^## \[$tag\]/,/^## \[v/p" CHANGELOG.md | sed '$d' | sed '1d' > body.md
+          echo "" >> body.md
+          prev="$(git describe --tags --abbrev=0 --exclude "$tag" 2>/dev/null || true)"
+          if [ -n "$prev" ]; then
+            echo "**Full Changelog**: https://github.com/${GITHUB_REPOSITORY}/compare/${prev}...${tag}" >> body.md
+          fi
+          test -s body.md
+
+      - name: Build pack artifacts
+        run: make pack
+
+      - name: Create release with artifacts
+        uses: softprops/action-gh-release@v2
+        with:
+          name: SCV ${{ github.ref_name }}
+          body_path: body.md
+          files: |
+            dist-release/perception-runtime-*.tar.gz
+            dist-release/scv-*-*

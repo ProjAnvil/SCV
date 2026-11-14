@@ -1,0 +1,49 @@
+# CI: the three-suite gate on every push to main and every pull request.
+# - engine unit tests (race detector + >=80% internal coverage gate)
+# - engine integration suite (real perceive.py chain; needs uv + python3 + git)
+# - perception pytest suite (uv-managed analyzer environment)
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  engine:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+      - name: Engine unit tests with coverage gate
+        run: make engine-test
+
+  engine-integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.27'
+      # uv provisions the analyzer venv on first run (network + ~1-2 min);
+      # python3 and git are preinstalled on ubuntu-latest.
+      - uses: astral-sh/setup-uv@v6
+      - name: Engine integration suite (real perceive chain)
+        run: make engine-test-integration
+
+  perception:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+      - name: Perception pytest suite
+        run: cd perception && uv run --project analyzer python -m pytest tests/ -q
