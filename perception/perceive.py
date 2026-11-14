@@ -18,6 +18,12 @@ as the "no enabled language present" outcome. The analyzer is fed
 `--languages` from the config ∩ detected set; the springboot extension keeps
 its own Spring-marker detection on top of java, orthogonal to
 `structure_languages`.
+
+v4 (spec 2026-11-13 §12): `--version` prints the one-line scv_version
+contract and exits before any tier work; the Go tiers (loader / graphmcp)
+gate on a prebuilt dist binary OR a live Go toolchain (a fresh prebuilt is
+run as-is, no build); every tier entry logs a `tierN start` line; dist
+`go build`s are serialized by dist/.build.lock (spec §10).
 """
 from __future__ import annotations
 
@@ -34,6 +40,10 @@ from pathlib import Path
 PERCEPTION_ROOT = Path(__file__).resolve().parent
 DIST_ROOT = Path(os.environ.get("SCV_PERCEPTION_DIST", Path.home() / ".scv/perception/dist"))
 TIER_TIMEOUT = 600  # seconds per tier
+# dist build lock (spec §10): O_EXCL lockfile name + the age at which a
+# lock counts as a crashed holder's leftover and is taken over.
+BUILD_LOCK_NAME = ".build.lock"
+BUILD_LOCK_STALE_SECONDS = 600  # 10 minutes
 
 # (zh, en) — reason codes never contain tool names (spec §5.3); the missing
 # runtime footnote names the runtime, not the tool (spec 2026-10-14 §1).
@@ -100,6 +110,19 @@ def log_line(analysis_dir: Path, message: str) -> None:
     stamp = time.strftime("%Y-%m-%dT%H:%M:%S")
     with open(analysis_dir / "perception.log", "a", encoding="utf-8") as fh:
         fh.write(f"{stamp} {message}\n")
+
+
+def scv_version() -> str:
+    """First released version heading in CHANGELOG.md (spec §12) — the
+    `## [Unreleased]` head never counts. "unknown" when the file is absent
+    or malformed (installed layouts): --version must honor its contract
+    regardless."""
+    try:
+        text = (PERCEPTION_ROOT.parent / "CHANGELOG.md").read_text(encoding="utf-8")
+    except OSError:
+        return "unknown"
+    m = re.search(r"^## \[(v\d+\.\d+\.\d+)\]", text, re.MULTILINE)
+    return m.group(1) if m else "unknown"
 
 
 def load_manifest(adapter_id: str) -> dict:
@@ -304,6 +327,15 @@ def probe_go():
     return (major, minor) if (major, minor) >= (1, 27) else None
 
 
+def prebuilt(path: Path) -> bool:
+    """Tier gate (spec §12): a prebuilt dist binary satisfies the Go tiers
+    without a toolchain. Presence is the contract — freshness stays the
+    build step's call (_go_binary_is_stale): a fresh prebuilt runs as-is, a
+    stale one is rebuilt when a toolchain exists (or its tier degrades
+    gracefully without one)."""
+    return path.exists()
+
+
 def render_footnote(reasons: list[str], lang: str = "zh") -> str:
     idx = 0 if lang.startswith("zh") else 1
     parts = []
@@ -419,16 +451,85 @@ def _go_binary_is_stale(binary: Path, source_dir: Path) -> bool:
         return False
 
 
-def run_loader(loader_dir: Path, json_path: Path, vg_path: Path, analysis_dir: Path):
+class _DistBuildLock:
+    """Serialize dist `go build`s across concurrent runs (spec §10).
+
+    O_EXCL create: exclusive by construction, no flock dependency. A lock
+    whose mtime is older than BUILD_LOCK_STALE_SECONDS belonged to a
+    crashed holder and is taken over (unlink + re-create); a live holder
+    always finishes well inside that window, so waiters make progress
+    without an explicit timeout. Release only unlinks a lock whose content
+    is still ours (a taken-over lock belongs to its new holder)."""
+
+    def __init__(self, analysis_dir: Path | None = None):
+        self._path = DIST_ROOT / BUILD_LOCK_NAME
+        self._analysis_dir = analysis_dir
+        self._held = False
+        self._token = ""
+
+    def acquire(self) -> None:
+        self._path.parent.mkdir(parents=True, exist_ok=True)
+        while not self._held:
+            try:
+                fd = os.open(self._path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o644)
+            except FileExistsError:
+                try:
+                    stale = time.time() - self._path.stat().st_mtime > BUILD_LOCK_STALE_SECONDS
+                except OSError:
+                    continue  # lock vanished between open and stat: retry now
+                if stale:
+                    if self._analysis_dir is not None:
+                        log_line(self._analysis_dir, "dist build lock stale: taken over")
+                    try:
+                        self._path.unlink()
+                    except OSError:
+                        pass  # another waiter won the takeover race; retry
+                time.sleep(0.05)
+                continue
+            self._token = f"pid={os.getpid()} acquired={int(time.time())}\n"
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(self._token)
+            self._held = True
+
+    def release(self) -> None:
+        if not self._held:
+            return
+        self._held = False
+        try:
+            if self._path.read_text(encoding="utf-8") == self._token:
+                self._path.unlink()
+        except OSError:
+            pass  # already taken over as stale: nothing of ours left
+
+    def __enter__(self) -> "_DistBuildLock":
+        self.acquire()
+        return self
+
+    def __exit__(self, *_exc) -> None:
+        self.release()
+
+
+def build_loader(loader_dir: Path, analysis_dir: Path) -> bool:
+    """Build the loader into dist (once; stale rebuilds) under the dist
+    build lock (spec §10). True when the binary is ready to run."""
     binary = DIST_ROOT / "loader" / "perception-loader"
+    if not _go_binary_is_stale(binary, loader_dir):
+        return True
     try:
-        if _go_binary_is_stale(binary, loader_dir):
-            binary.parent.mkdir(parents=True, exist_ok=True)
+        binary.parent.mkdir(parents=True, exist_ok=True)
+        with _DistBuildLock(analysis_dir):
             subprocess.run(["go", "build", "-o", str(binary), "."], cwd=loader_dir,
                            capture_output=True, text=True, timeout=TIER_TIMEOUT, check=True)
+        return True
     except (subprocess.SubprocessError, OSError) as e:
         log_line(analysis_dir, f"tier6 loader build failed: {_exc_tail(e)}")
+        return False
+
+
+def run_loader(loader_dir: Path, json_path: Path, vg_path: Path, analysis_dir: Path):
+    if not build_loader(loader_dir, analysis_dir):
         return None
+    binary = DIST_ROOT / "loader" / "perception-loader"
     try:
         res = subprocess.run([str(binary), str(json_path), str(vg_path)],
                              capture_output=True, text=True, timeout=TIER_TIMEOUT)
@@ -454,9 +555,10 @@ def build_graphmcp(analysis_dir: Path) -> Path | None:
         return binary
     try:
         binary.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.run(["go", "build", "-o", str(binary), "."],
-                       cwd=PERCEPTION_ROOT / "graphmcp",
-                       capture_output=True, text=True, timeout=TIER_TIMEOUT, check=True)
+        with _DistBuildLock(analysis_dir):
+            subprocess.run(["go", "build", "-o", str(binary), "."],
+                           cwd=PERCEPTION_ROOT / "graphmcp",
+                           capture_output=True, text=True, timeout=TIER_TIMEOUT, check=True)
         return binary
     except (subprocess.SubprocessError, OSError) as e:
         log_line(analysis_dir, f"tier8 graphmcp build failed: {_exc_tail(e)}")
@@ -469,6 +571,12 @@ def main() -> int:
     ap.add_argument("analysis_dir")
     ap.add_argument("--source", choices=["local", "remote"], default="local")
     ap.add_argument("--lang", default="zh")
+    # --version (spec §12): one-line JSON on stdout, exit 0. argparse's
+    # version action fires during parse_args — before positional-argument
+    # validation and before any tier work (no analysis dir is touched).
+    ap.add_argument("--version", action="version",
+                    version=json.dumps({"scv_version": scv_version(),
+                                        "contract": "1.0"}))
     args = ap.parse_args()
 
     repo, analysis_dir = Path(args.repo_path).resolve(), Path(args.analysis_dir).resolve()
@@ -531,11 +639,13 @@ def main() -> int:
 
     cleanup_stale(analysis_dir)
     _flush_warnings()
+    log_line(analysis_dir, "tier1 start")
     detect_line = "tier1 detect: springboot" if spring else "tier1 detect: structure"
     log_line(analysis_dir, f"{detect_line}, source={args.source}, "
                            f"extensions={active_extensions}, languages={detected}")
 
     reasons: list[str] = []
+    log_line(analysis_dir, "tier2 start")
     if os.environ.get("SCV_PERCEPTION_ANALYZER"):
         # substitute analyzer executable: invoked directly, no uv involved
         log_line(analysis_dir, "tier2 analyzer override active (SCV_PERCEPTION_ANALYZER)")
@@ -548,6 +658,7 @@ def main() -> int:
             print(json.dumps(emit, ensure_ascii=False))
             return 0
 
+    log_line(analysis_dir, "tier3 start")
     structure_json = analysis_dir / "structure.json"
     if not run_analyzer(repo, structure_json, analysis_dir, active_extensions, detected):
         emit["reason"] = "analyzer-failed"
@@ -575,7 +686,9 @@ def main() -> int:
 
     vg_path = analysis_dir / "structure.vg"
     loader_info = None
-    if probe_go():
+    log_line(analysis_dir, "tier6 start")
+    go_ok = probe_go()
+    if go_ok or prebuilt(DIST_ROOT / "loader" / "perception-loader"):
         loader_info = run_loader(PERCEPTION_ROOT / "loader", structure_json, vg_path, analysis_dir)
     else:
         reasons.append("go-missing")
@@ -601,7 +714,10 @@ def main() -> int:
     # Graph-query tier (vectra v0.6 Cypher): our own multi-repo server is the
     # preferred registration — one scv-graph registration serves EVERY
     # analyzed repository, so the hint does not depend on this run's vg.
-    graph_bin = build_graphmcp(analysis_dir) if probe_go() else None
+    log_line(analysis_dir, "tier8 start")
+    graph_bin = (build_graphmcp(analysis_dir)
+                 if go_ok or prebuilt(DIST_ROOT / "graphmcp" / "scv-graph-mcp")
+                 else None)
     has_mcp = shutil.which("vectra-mcp") is not None
     ts = time.strftime("%Y-%m-%d %H:%M")
     if graph_bin:

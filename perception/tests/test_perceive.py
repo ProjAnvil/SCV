@@ -19,8 +19,12 @@ End-to-end cases run perceive.py as a subprocess with a controlled HOME
 """
 import json
 import os
+import re
+import shutil
 import subprocess
 import sys
+import threading
+import time
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -893,6 +897,245 @@ class EndToEndTests(unittest.TestCase):
             log = (out / "perception.log").read_text(encoding="utf-8")
             self.assertIn("unknown value 'kotlin'", log)
             self.assertFalse((out / "structure.json").exists())
+
+
+# --- Task 5 additions (spec 2026-11-13 §12) ------------------------------
+#
+# --version contract, tier-start log lines, the binary-OR-toolchain tier
+# gate, and the dist build lock. The existing inline-repo e2e tests run
+# under MINIMAL_PATH and never reach tier 6, so these cases bring their own
+# harness: a fake PREBUILT dist/loader/perception-loader with a fresh mtime
+# (the SCV_PERCEPTION_DIST seam already points _run_perceive runs at a temp
+# dist), the SCV_PERCEPTION_ANALYZER fake for tier 3, and a copy of the
+# shipped golang-complex fixture as the analyzed repo.
+
+GOLANG_COMPLEX_FIXTURE = ROOT / "fixture" / "repos" / "golang-complex"
+
+
+# A stand-in prebuilt loader binary: same CLI as the real loader
+# (<structure.json> <structure.vg>), writes the vg artifact and answers
+# loader JSON on stdout.
+FAKE_LOADER_TEMPLATE = '''#!/usr/bin/env python3
+import json, sys
+vg_path = sys.argv[2]
+with open(vg_path, "w") as fh:
+    fh.write("fake vg snapshot\\n")
+print(json.dumps({"cycles": []}))
+'''
+
+
+# A stand-in `go` executable for build-lock tests: records build-entry/exit
+# timestamps to the file named by GO_SHIM_STAMP (so the test can prove two
+# builds never overlapped), sleeps to widen the race window, and creates the
+# -o target like a real build would.
+GO_SHIM_TEMPLATE = '''#!/usr/bin/env python3
+import os, sys, time
+from pathlib import Path
+
+stamp = os.environ["GO_SHIM_STAMP"]
+
+def record(event):
+    with open(stamp, "a") as fh:
+        fh.write(f"{os.getpid()} {event} {time.time():.6f}\\n")
+
+out = sys.argv[sys.argv.index("-o") + 1]
+record("start")
+time.sleep(0.3)
+Path(out).write_text("fake go build output\\n")
+record("end")
+'''
+
+
+def _golang_fixture_repo(d: Path) -> Path:
+    """Copy the shipped golang-complex fixture into the temp tree."""
+    return shutil.copytree(GOLANG_COMPLEX_FIXTURE, d)
+
+
+def _fake_loader(dist: Path) -> Path:
+    """Write a fake prebuilt dist/loader/perception-loader with an explicit
+    fresh mtime (now) — newer than perception/loader sources, so the
+    existing staleness check runs it as-is instead of trying to build."""
+    loader = dist / "loader" / "perception-loader"
+    loader.parent.mkdir(parents=True, exist_ok=True)
+    loader.write_text(FAKE_LOADER_TEMPLATE)
+    loader.chmod(0o755)
+    now = time.time()
+    os.utime(loader, (now, now))
+    return loader
+
+
+class VersionFlagTests(unittest.TestCase):
+    """--version (spec §12): one-line JSON on stdout, exit 0, BEFORE any
+    tier work — not even the positional arguments are required."""
+
+    def test_version_flag_contract(self):
+        with TemporaryDirectory() as d:
+            d = Path(d)
+            env = {**os.environ, "HOME": str(d / "home"), "PATH": MINIMAL_PATH,
+                   "SCV_PERCEPTION_DIST": str(d / "dist")}
+            res = subprocess.run(
+                [sys.executable, str(ROOT / "perceive.py"), "--version"],
+                capture_output=True, text=True, timeout=60, env=env)
+            self.assertEqual(res.returncode, 0, res.stderr)
+            self.assertEqual(len(res.stdout.strip().splitlines()), 1)  # single line
+            payload = json.loads(res.stdout)
+            self.assertEqual(payload["contract"], "1.0")
+            # scv_version mirrors the FIRST released heading in CHANGELOG.md —
+            # the [Unreleased] head never counts.
+            changelog = (ROOT.parent / "CHANGELOG.md").read_text(encoding="utf-8")
+            m = re.search(r"^## \[(v\d+\.\d+\.\d+)\]", changelog, re.MULTILINE)
+            self.assertIsNotNone(m, "CHANGELOG.md has no released heading")
+            self.assertEqual(payload["scv_version"], m.group(1))
+            self.assertNotIn("Unreleased", payload["scv_version"])
+
+
+class PrebuiltLoaderEndToEndTests(unittest.TestCase):
+    """e2e through the Task 5 harness: fake prebuilt loader + fake analyzer +
+    golang-complex fixture copy, PATH without go (MINIMAL_PATH)."""
+
+    def _run(self, d: Path, with_loader: bool) -> subprocess.CompletedProcess:
+        fake = _write_fake(d / "fake-analyzer", "ok")
+        repo = _golang_fixture_repo(d / "repo")
+        out = d / "analysis"
+        if with_loader:
+            # _run_perceive points SCV_PERCEPTION_DIST at out.parent/"dist"
+            _fake_loader(out.parent / "dist")
+        return _run_perceive(repo, out, cfg={},
+                             env_extra={"SCV_PERCEPTION_ANALYZER": str(fake)})
+
+    def test_tier_start_lines_present(self):
+        # spec §12: every tier entry logs a `tierN start` line before its
+        # work — tiers 1/3/6 per the plan, 2/8 pinned as well.
+        with TemporaryDirectory() as d:
+            res = self._run(Path(d), with_loader=True)
+            self.assertEqual(res.returncode, 0, res.stderr)
+            payload = _payload(res)
+            self.assertEqual(payload["status"], "ok")
+            self.assertTrue(payload["tiers"]["vg"])  # reached the loader tier
+            log = (Path(d) / "analysis" / "perception.log").read_text(encoding="utf-8")
+            for line in ("tier1 start", "tier2 start", "tier3 start",
+                         "tier6 start", "tier8 start"):
+                self.assertIn(line, log)
+
+    def test_prebuilt_binary_skips_go_probe(self):
+        # binary-OR-toolchain gate: with `go` absent from PATH the fresh
+        # prebuilt loader alone runs the vg tier — the prebuilt fake itself
+        # executes (vg content + loader-answered cycle counts), and no build
+        # is ever attempted.
+        with TemporaryDirectory() as d:
+            d = Path(d)
+            res = self._run(d, with_loader=True)
+            self.assertEqual(res.returncode, 0, res.stderr)
+            payload = _payload(res)
+            self.assertEqual(payload["status"], "ok")
+            self.assertTrue(payload["tiers"]["vg"])
+            self.assertEqual((d / "analysis" / "structure.vg").read_text(encoding="utf-8"),
+                             "fake vg snapshot\n")
+            self.assertEqual(payload["counts"]["cycles_fatal"], 0)  # loader answered
+            reason = payload["reason"]
+            reason = [reason] if isinstance(reason, str) else reason
+            self.assertNotIn("go-missing", reason)
+            log = (d / "analysis" / "perception.log").read_text(encoding="utf-8")
+            self.assertNotIn("loader build failed", log)
+
+    def test_loader_gate_without_prebuilt_or_go_reports_go_missing(self):
+        # additivity guard: no prebuilt binary + no toolchain keeps the exact
+        # pre-change outcome — go-missing reason, vg tier off, cycle counts
+        # null (the adapter never computes SCCs).
+        with TemporaryDirectory() as d:
+            res = self._run(Path(d), with_loader=False)
+            self.assertEqual(res.returncode, 0, res.stderr)
+            payload = _payload(res)
+            self.assertEqual(payload["status"], "ok")
+            self.assertFalse(payload["tiers"]["vg"])
+            reason = payload["reason"]
+            reason = [reason] if isinstance(reason, str) else reason
+            self.assertIn("go-missing", reason)
+            self.assertIsNone(payload["counts"]["cycles_fatal"])
+            self.assertIn("Go 1.27+", payload["footnote"])
+
+
+class BuildLockTests(unittest.TestCase):
+    """dist/.build.lock (spec §10): O_EXCL create, stale takeover past
+    10 minutes, mutual exclusion between concurrent build_loader callers."""
+
+    def _lock_setup(self, d: Path):
+        shim_dir = d / "shimbin"
+        shim_dir.mkdir()
+        shim = shim_dir / "go"
+        shim.write_text(GO_SHIM_TEMPLATE)
+        shim.chmod(0o755)
+        stamp = d / "go-shim-events.log"
+        loader_dir = d / "loader-src"
+        loader_dir.mkdir()
+        (loader_dir / "main.go").write_text("package main\n")
+        (loader_dir / "go.mod").write_text("module fake/loader\n\ngo 1.27\n")
+        future = time.time() + 3600
+        for name in ("main.go", "go.mod"):
+            # future-dated sources keep the binary definitionally stale, so
+            # EVERY caller runs the (shimmed) build — the overlap probe has
+            # two builds to observe regardless of thread timing.
+            os.utime(loader_dir / name, (future, future))
+        dist = d / "dist"
+        dist.mkdir()
+        analysis = d / "analysis"
+        analysis.mkdir()
+        env = {"PATH": f"{shim_dir}{os.pathsep}{os.environ.get('PATH', '')}",
+               "GO_SHIM_STAMP": str(stamp)}
+        return loader_dir, dist, analysis, stamp, env
+
+    def test_concurrent_build_lock_serializes(self):
+        with TemporaryDirectory() as d:
+            d = Path(d)
+            loader_dir, dist, analysis, stamp, env = self._lock_setup(d)
+            results: list[bool] = []
+            errors: list[BaseException] = []
+
+            def worker():
+                try:
+                    results.append(perceive.build_loader(loader_dir, analysis))
+                except BaseException as e:  # surfaced through the asserts below
+                    errors.append(e)
+
+            with mock.patch.object(perceive, "DIST_ROOT", dist), \
+                 mock.patch.dict(os.environ, env):
+                threads = [threading.Thread(target=worker) for _ in range(2)]
+                for t in threads:
+                    t.start()
+                for t in threads:
+                    t.join(timeout=60)
+                self.assertFalse(any(t.is_alive() for t in threads))
+                self.assertFalse((dist / ".build.lock").exists())  # released
+            self.assertEqual(errors, [])
+            self.assertEqual(results, [True, True])
+            spans: dict[str, dict[str, float]] = {}
+            for line in stamp.read_text(encoding="utf-8").splitlines():
+                pid, event, ts = line.split()
+                spans.setdefault(pid, {})[event] = float(ts)
+            self.assertEqual(len(spans), 2, "both threads must run the build")
+            ordered = sorted((s["start"], s["end"]) for s in spans.values())
+            for start, end in ordered:
+                self.assertLess(start, end)
+            self.assertLessEqual(ordered[0][1], ordered[1][0],
+                                 "dist build lock must serialize go builds")
+
+    def test_stale_lock_taken_over(self):
+        # a lock left behind by a crashed holder (mtime > 10 min) must not
+        # wedge the next build: it is unlinked and re-acquired.
+        with TemporaryDirectory() as d:
+            d = Path(d)
+            loader_dir, dist, analysis, stamp, env = self._lock_setup(d)
+            lock = dist / ".build.lock"
+            lock.write_text("pid=1 acquired=0\n")
+            ancient = time.time() - 3600
+            os.utime(lock, (ancient, ancient))
+            with mock.patch.object(perceive, "DIST_ROOT", dist), \
+                 mock.patch.dict(os.environ, env):
+                self.assertTrue(perceive.build_loader(loader_dir, analysis))
+            self.assertEqual(len(stamp.read_text(encoding="utf-8").splitlines()), 2)
+            self.assertFalse(lock.exists())
+            log = (analysis / "perception.log").read_text(encoding="utf-8")
+            self.assertIn("dist build lock stale: taken over", log)
 
 
 if __name__ == "__main__":
