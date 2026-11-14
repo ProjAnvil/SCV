@@ -63,6 +63,9 @@ type (
 	LLM = config.LLM
 	// RunRequest is one invocation of the run pipeline (see internal/run).
 	RunRequest = run.RunRequest
+	// RunResult is the terminal outcome of a run (see internal/run) —
+	// JobHandle.Wait's return type, nameable for host-side fakes.
+	RunResult = run.RunResult
 	// DocGenerator is the doc-generation hook seam (see internal/run).
 	DocGenerator = run.DocGenerator
 	// Event is one line of a job's events.jsonl (see internal/job).
