@@ -5,6 +5,11 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [v0.14.2] - 2026-11-15
+
+### Fixed
+- **Façade type re-exports in `engine/supervisor`**: the v0.14.1 embedding API was uncallable from external modules — `New(ctx, cfg config.Config)` and `RunWithDocs(ctx, req run.RunRequest, docs run.DocGenerator)` traffic in types defined under `engine/internal/`, which Go's internal-package visibility forbids outside the module, so a host could neither import the packages nor construct argument values (only `AgentInvoker` was aliased out). The supervisor package now re-exports `Config`, `LLM`, `RunRequest`, `DocGenerator`, and `Event` as type aliases, making the documented embedding surface constructible and nameable by hosts. Pure alias addition: no behavior change, verified by an external probe module (construct `supervisor.Config{LLM: &supervisor.LLM{...}}`, call `AgentDocGenerator`) and the full engine test suite.
+
 ## [v0.14.1] - 2026-11-15
 
 ### Added

@@ -50,6 +50,25 @@ type Supervisor struct {
 // each call, so it never touches (or sees) the agent's credentials.
 type AgentInvoker = docgen.AgentInvoker
 
+// Façade type re-exports: external hosts cannot import engine internal
+// packages (Go's internal-package visibility), so every type crossing
+// the embedding API surface must be nameable at this package. New,
+// RunWithDocs, and JobHandle.Events already traffic in these shapes;
+// the aliases below make them constructible and nameable by hosts
+// without changing any behavior.
+type (
+	// Config is the engine configuration (see internal/config).
+	Config = config.Config
+	// LLM is the llm config section (see internal/config).
+	LLM = config.LLM
+	// RunRequest is one invocation of the run pipeline (see internal/run).
+	RunRequest = run.RunRequest
+	// DocGenerator is the doc-generation hook seam (see internal/run).
+	DocGenerator = run.DocGenerator
+	// Event is one line of a job's events.jsonl (see internal/job).
+	Event = job.Event
+)
+
 // New validates cfg, resolves the scv home layout, and prepares the
 // jobs directory (idempotent). The ctx passed here is the root of every
 // run the supervisor starts: cancelling it unwinds all in-flight runs,
